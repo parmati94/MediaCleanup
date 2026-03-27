@@ -1,0 +1,251 @@
+<div class="space-y-6">
+    <div class="card">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Library Analysis & Insights</h2>
+            <button @click="runAnalysis(true)" :disabled="loading" class="btn-primary">
+                <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                Refresh Analysis
+            </button>
+        </div>
+
+        <template x-if="!analysis">
+            <div class="text-center py-12">
+                <p class="text-gray-600 dark:text-gray-400 mb-4">No analysis data available. Click "Refresh Analysis" to begin.</p>
+            </div>
+        </template>
+        
+        <template x-if="analysis">
+            <div>
+                <!-- Sub-Navigation -->
+                <div class="mb-6">
+                    <nav class="flex space-x-2 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+                        <button @click="analysisSection = 'space-consumers'" 
+                                :class="analysisSection === 'space-consumers' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'"
+                                class="px-4 py-3 border-b-2 font-medium text-sm transition whitespace-nowrap flex items-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path>
+                            </svg>
+                            Top Space Consumers
+                        </button>
+                        <button @click="analysisSection = 'removal-candidates'" 
+                                :class="analysisSection === 'removal-candidates' ? 'border-red-600 text-red-600 dark:text-red-400' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'"
+                                class="px-4 py-3 border-b-2 font-medium text-sm transition whitespace-nowrap flex items-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                            </svg>
+                            Removal Candidates
+                        </button>
+                        <button @click="analysisSection = 'stale-content'" 
+                                :class="analysisSection === 'stale-content' ? 'border-yellow-600 text-yellow-600 dark:text-yellow-400' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'"
+                                class="px-4 py-3 border-b-2 font-medium text-sm transition whitespace-nowrap flex items-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Stale Content
+                        </button>
+                        <button @click="analysisSection = 'age-distribution'" 
+                                :class="analysisSection === 'age-distribution' ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'"
+                                class="px-4 py-3 border-b-2 font-medium text-sm transition whitespace-nowrap flex items-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                            </svg>
+                            Age Distribution
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- Top Space Consumers Section -->
+                <div x-show="analysisSection === 'space-consumers'" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100">
+                    <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">Largest Items in Library (Top 20)</h3>
+                    <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                        <template x-if="analysis?.top_lists?.largest_items && analysis.top_lists.largest_items.length > 0">
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                    <thead>
+                                        <tr>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Title</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Library</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">File Size</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Play Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                                        <template x-for="(item, index) in analysis.top_lists.largest_items" :key="index">
+                                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                <td class="px-3 py-3 whitespace-nowrap">
+                                                    <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="item.title"></div>
+                                                    <div class="text-xs text-gray-500" x-text="item.year"></div>
+                                                </td>
+                                                <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400" x-text="item.library_type"></td>
+                                                <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400" x-text="item.library_name"></td>
+                                                <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold text-purple-600 dark:text-purple-400" x-text="formatFileSize(item.file_size)"></td>
+                                                <td class="px-3 py-3 whitespace-nowrap">
+                                                    <span class="px-2 py-1 text-xs rounded-full" 
+                                                          :class="item.play_count === 0 ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'"
+                                                          x-text="item.play_count + ' plays'">
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </template>
+                        <template x-if="!analysis?.top_lists?.largest_items || analysis.top_lists.largest_items.length === 0">
+                            <p class="text-gray-600 dark:text-gray-400 text-center py-8">No file size data available. Enable file size calculation in Tautulli.</p>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Removal Candidates Section -->
+                <div x-show="analysisSection === 'removal-candidates'" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100">
+                    <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">Largest Never Watched (Top Removal Candidates)</h3>
+                    <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                        <template x-if="analysis?.top_lists?.largest_unwatched && analysis.top_lists.largest_unwatched.length > 0">
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                    <thead>
+                                        <tr>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Title</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Library</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">File Size</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                                        <template x-for="(item, index) in analysis.top_lists.largest_unwatched" :key="index">
+                                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                <td class="px-3 py-3 whitespace-nowrap">
+                                                    <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="item.title"></div>
+                                                    <div class="text-xs text-gray-500" x-text="item.year"></div>
+                                                </td>
+                                                <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400" x-text="item.library_type"></td>
+                                                <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400" x-text="item.library_name"></td>
+                                                <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold text-red-600 dark:text-red-400" x-text="formatFileSize(item.file_size)"></td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </template>
+                        <template x-if="!analysis?.top_lists?.largest_unwatched || analysis.top_lists.largest_unwatched.length === 0">
+                            <p class="text-gray-600 dark:text-gray-400 text-center py-8">No unwatched items found or file size data unavailable.</p>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Stale Content Section -->
+                <div x-show="analysisSection === 'stale-content'" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100">
+                    <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">Stale Content (Not Watched in 1+ Year)</h3>
+                    <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Items watched at least once, but not in the past year.</p>
+                        <template x-if="analysis?.top_lists?.stale_content && analysis.top_lists.stale_content.length > 0">
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                    <thead>
+                                        <tr>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Title</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">File Size</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Days Since Watched</th>
+                                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Play Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                                        <template x-for="(item, index) in analysis.top_lists.stale_content" :key="index">
+                                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                <td class="px-3 py-3 whitespace-nowrap">
+                                                    <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="item.title"></div>
+                                                    <div class="text-xs text-gray-500" x-text="item.year"></div>
+                                                </td>
+                                                <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400" x-text="item.library_type"></td>
+                                                <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400" x-text="formatFileSize(item.file_size)"></td>
+                                                <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold text-yellow-600 dark:text-yellow-400">
+                                                    <span x-text="item.days_since_watched"></span> days
+                                                </td>
+                                                <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400" x-text="item.play_count"></td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </template>
+                        <template x-if="!analysis?.top_lists?.stale_content || analysis.top_lists.stale_content.length === 0">
+                            <p class="text-gray-600 dark:text-gray-400 text-center py-8">No stale content found.</p>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Age Distribution Section -->
+                <div x-show="analysisSection === 'age-distribution'" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100">
+                    <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">Age Distribution of Never Watched Content</h3>
+                    <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-6">
+                        <template x-if="analysis?.age_distribution">
+                            <div class="space-y-4 max-w-3xl mx-auto">
+                                <div>
+                                    <div class="flex justify-between items-center mb-2">
+                                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">0-6 months</span>
+                                        <span class="text-sm font-bold text-gray-900 dark:text-white" x-text="analysis.age_distribution['0-6_months']"></span>
+                                    </div>
+                                    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4">
+                                        <div class="bg-blue-600 h-4 rounded-full transition-all flex items-center justify-end pr-2" :style="`width: ${(analysis.age_distribution['0-6_months'] / getTotalUnwatched() * 100)}%`">
+                                            <span class="text-xs text-white font-medium" x-show="analysis.age_distribution['0-6_months'] > 0" x-text="`${((analysis.age_distribution['0-6_months'] / getTotalUnwatched() * 100) || 0).toFixed(0)}%`"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between items-center mb-2">
+                                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">6-12 months</span>
+                                        <span class="text-sm font-bold text-gray-900 dark:text-white" x-text="analysis.age_distribution['6-12_months']"></span>
+                                    </div>
+                                    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4">
+                                        <div class="bg-blue-600 h-4 rounded-full transition-all flex items-center justify-end pr-2" :style="`width: ${(analysis.age_distribution['6-12_months'] / getTotalUnwatched() * 100)}%`">
+                                            <span class="text-xs text-white font-medium" x-show="analysis.age_distribution['6-12_months'] > 0" x-text="`${((analysis.age_distribution['6-12_months'] / getTotalUnwatched() * 100) || 0).toFixed(0)}%`"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between items-center mb-2">
+                                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">1-2 years</span>
+                                        <span class="text-sm font-bold text-gray-900 dark:text-white" x-text="analysis.age_distribution['1-2_years']"></span>
+                                    </div>
+                                    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4">
+                                        <div class="bg-blue-600 h-4 rounded-full transition-all flex items-center justify-end pr-2" :style="`width: ${(analysis.age_distribution['1-2_years'] / getTotalUnwatched() * 100)}%`">
+                                            <span class="text-xs text-white font-medium" x-show="analysis.age_distribution['1-2_years'] > 0" x-text="`${((analysis.age_distribution['1-2_years'] / getTotalUnwatched() * 100) || 0).toFixed(0)}%`"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between items-center mb-2">
+                                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">2-3 years</span>
+                                        <span class="text-sm font-bold text-gray-900 dark:text-white" x-text="analysis.age_distribution['2-3_years']"></span>
+                                    </div>
+                                    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4">
+                                        <div class="bg-blue-600 h-4 rounded-full transition-all flex items-center justify-end pr-2" :style="`width: ${(analysis.age_distribution['2-3_years'] / getTotalUnwatched() * 100)}%`">
+                                            <span class="text-xs text-white font-medium" x-show="analysis.age_distribution['2-3_years'] > 0" x-text="`${((analysis.age_distribution['2-3_years'] / getTotalUnwatched() * 100) || 0).toFixed(0)}%`"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between items-center mb-2">
+                                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">3+ years</span>
+                                        <span class="text-sm font-bold text-gray-900 dark:text-white" x-text="analysis.age_distribution['3+_years']"></span>
+                                    </div>
+                                    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4">
+                                        <div class="bg-blue-600 h-4 rounded-full transition-all flex items-center justify-end pr-2" :style="`width: ${(analysis.age_distribution['3+_years'] / getTotalUnwatched() * 100)}%`">
+                                            <span class="text-xs text-white font-medium" x-show="analysis.age_distribution['3+_years'] > 0" x-text="`${((analysis.age_distribution['3+_years'] / getTotalUnwatched() * 100) || 0).toFixed(0)}%`"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+            </div>
+        </template>
+    </div>
+</div>

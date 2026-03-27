@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  media-cleanup-ui:
+    build: .
+    container_name: media-cleanup-ui
+    ports:
+      - "5180:80"
+    volumes:
+      - ./data/config.yaml:/app/data/config.yaml
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    environment:
+      - TZ=America/New_York
