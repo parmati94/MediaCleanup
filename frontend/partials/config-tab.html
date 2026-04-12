@@ -105,6 +105,12 @@
                             <input type="password" x-model="config.tautulli.api_key" class="input-field">
                         </div>
                     </div>
+                    <div class="flex items-center space-x-3 mt-3">
+                        <button type="button" @click="testConnection('tautulli')" class="btn-secondary text-sm py-1.5 px-3">Test Connection</button>
+                        <span x-show="connectionStatus.tautulli !== null"
+                              :class="connectionStatus.tautulli?.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                              class="text-sm font-medium" x-text="connectionStatus.tautulli?.message"></span>
+                    </div>
                 </div>
 
                 <!-- Sonarr Settings -->
@@ -129,6 +135,12 @@
                                     <input type="checkbox" x-model="config.sonarr.delete_files" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
                                     <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Delete files from disk</span>
                                 </label>
+                            </div>
+                            <div class="flex items-center space-x-3">
+                                <button type="button" @click="testConnection('sonarr')" class="btn-secondary text-sm py-1.5 px-3">Test Connection</button>
+                                <span x-show="connectionStatus.sonarr !== null"
+                                      :class="connectionStatus.sonarr?.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                                      class="text-sm font-medium" x-text="connectionStatus.sonarr?.message"></span>
                             </div>
                         </div>
                     </div>
@@ -156,6 +168,12 @@
                                     <input type="checkbox" x-model="config.radarr.delete_files" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
                                     <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Delete files from disk</span>
                                 </label>
+                            </div>
+                            <div class="flex items-center space-x-3">
+                                <button type="button" @click="testConnection('radarr')" class="btn-secondary text-sm py-1.5 px-3">Test Connection</button>
+                                <span x-show="connectionStatus.radarr !== null"
+                                      :class="connectionStatus.radarr?.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                                      class="text-sm font-medium" x-text="connectionStatus.radarr?.message"></span>
                             </div>
                         </div>
                     </div>

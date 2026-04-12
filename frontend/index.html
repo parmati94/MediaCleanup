@@ -74,10 +74,10 @@
                             class="px-4 py-2 border-b-2 font-medium text-sm transition">
                         Configuration
                     </button>
-                    <button @click="currentTab = 'preview'" 
-                            :class="currentTab === 'preview' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                    <button @click="currentTab = 'removal'" 
+                            :class="currentTab === 'removal' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                             class="px-4 py-2 border-b-2 font-medium text-sm transition">
-                        Preview
+                        Removal
                     </button>
                 </nav>
             </div>
@@ -97,9 +97,9 @@
                 {{> config-tab}}
             </div>
 
-            <!-- Preview Tab -->
-            <div x-show="currentTab === 'preview'" x-cloak>
-                {{> preview-tab}}
+            <!-- Removal Tab -->
+            <div x-show="currentTab === 'removal'" x-cloak>
+                {{> removal-tab}}
             </div>
         </main>
 

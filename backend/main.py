@@ -15,6 +15,8 @@ import yaml
 from backend.core.analyzer import LibraryAnalyzer
 from backend.core.media_remover import MediaRemover
 from backend.api.tautulli import TautulliAPI
+from backend.api.radarr import RadarrAPI
+from backend.api.sonarr import SonarrAPI
 
 # Configure logging
 logging.basicConfig(
@@ -95,6 +97,9 @@ def get_default_config() -> Dict[str, Any]:
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     logger.info("Starting Media Cleanup UI backend")
+    if not CONFIG_PATH.exists():
+        logger.info(f"No config file found — writing defaults to {CONFIG_PATH}")
+        save_config(get_default_config())
     yield
     logger.info("Shutting down Media Cleanup UI backend")
 
@@ -351,6 +356,48 @@ async def get_libraries():
     except Exception as e:
         logger.error(f"Error getting libraries: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/test/tautulli")
+async def test_tautulli():
+    """Test Tautulli connection using saved config."""
+    try:
+        config = load_config()
+        tautulli = TautulliAPI(config['tautulli']['url'], config['tautulli']['api_key'])
+        libraries = tautulli.get_libraries()
+        count = len(libraries)
+        return {"success": True, "message": f"Connected \u2014 {count} librar{'ies' if count != 1 else 'y'} found"}
+    except Exception as e:
+        logger.warning(f"Tautulli connection test failed: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@app.get("/api/test/radarr")
+async def test_radarr():
+    """Test Radarr connection using saved config."""
+    try:
+        config = load_config()
+        radarr = RadarrAPI(config['radarr']['url'], config['radarr']['api_key'])
+        status = radarr._make_request('system/status')
+        version = status.get('version', 'unknown') if status else 'unknown'
+        return {"success": True, "message": f"Connected \u2014 Radarr v{version}"}
+    except Exception as e:
+        logger.warning(f"Radarr connection test failed: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@app.get("/api/test/sonarr")
+async def test_sonarr():
+    """Test Sonarr connection using saved config."""
+    try:
+        config = load_config()
+        sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
+        status = sonarr._make_request('system/status')
+        version = status.get('version', 'unknown') if status else 'unknown'
+        return {"success": True, "message": f"Connected \u2014 Sonarr v{version}"}
+    except Exception as e:
+        logger.warning(f"Sonarr connection test failed: {e}")
+        return {"success": False, "message": str(e)}
 
 
 # Helper functions

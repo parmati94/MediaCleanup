@@ -32,13 +32,54 @@
                 </svg>
                 Configure Settings
             </button>
-            <button @click="currentTab = 'preview'" class="btn-secondary">
+            <button @click="currentTab = 'removal'" class="btn-secondary">
                 <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                 </svg>
-                Preview Removals
+                Execute Removal
             </button>
+        </div>
+    </div>
+
+    <!-- Service Status -->
+    <div class="card">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Service Status</h2>
+            <button @click="testAllConnections()" :disabled="loading" class="btn-secondary text-sm">
+                <svg class="inline-block w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                Test All
+            </button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="flex items-center space-x-3 p-4 rounded-lg border transition-colors"
+                 :class="connectionStatus.tautulli === null ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800' : connectionStatus.tautulli.success ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'">
+                <div class="w-3 h-3 rounded-full flex-shrink-0"
+                     :class="connectionStatus.tautulli === null ? 'bg-gray-400' : connectionStatus.tautulli.success ? 'bg-green-500' : 'bg-red-500'"></div>
+                <div class="min-w-0">
+                    <div class="font-semibold text-gray-800 dark:text-gray-200">Tautulli</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate" x-text="connectionStatus.tautulli?.message || 'Not tested'"></div>
+                </div>
+            </div>
+            <div class="flex items-center space-x-3 p-4 rounded-lg border transition-colors"
+                 :class="connectionStatus.sonarr === null ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800' : connectionStatus.sonarr.success ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'">
+                <div class="w-3 h-3 rounded-full flex-shrink-0"
+                     :class="connectionStatus.sonarr === null ? 'bg-gray-400' : connectionStatus.sonarr.success ? 'bg-green-500' : 'bg-red-500'"></div>
+                <div class="min-w-0">
+                    <div class="font-semibold text-gray-800 dark:text-gray-200">Sonarr</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate" x-text="connectionStatus.sonarr?.message || 'Not tested'"></div>
+                </div>
+            </div>
+            <div class="flex items-center space-x-3 p-4 rounded-lg border transition-colors"
+                 :class="connectionStatus.radarr === null ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800' : connectionStatus.radarr.success ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'">
+                <div class="w-3 h-3 rounded-full flex-shrink-0"
+                     :class="connectionStatus.radarr === null ? 'bg-gray-400' : connectionStatus.radarr.success ? 'bg-green-500' : 'bg-red-500'"></div>
+                <div class="min-w-0">
+                    <div class="font-semibold text-gray-800 dark:text-gray-200">Radarr</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate" x-text="connectionStatus.radarr?.message || 'Not tested'"></div>
+                </div>
+            </div>
         </div>
     </div>
 
