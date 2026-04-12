@@ -2,15 +2,7 @@
     <div class="card">
         <div class="flex justify-between items-center mb-4">
             <div class="flex items-center space-x-4">
-                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Preview Removals</h2>
-                <template x-if="config?.safety?.dry_run">
-                    <div class="flex items-center space-x-2 px-3 py-1 bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-500 rounded-lg">
-                        <svg class="w-4 h-4 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                        </svg>
-                        <span class="text-xs font-semibold text-yellow-800 dark:text-yellow-200">DRY RUN MODE</span>
-                    </div>
-                </template>
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Remove Media</h2>
             </div>
             <button @click="loadCandidates" :disabled="loading" class="btn-primary">
                 <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -20,9 +12,31 @@
             </button>
         </div>
 
+        <!-- Dry Run Toggle -->
+        <div class="flex items-center justify-between p-4 mb-6 rounded-lg border-2"
+             :class="config?.safety?.dry_run ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20' : 'border-red-400 bg-red-50 dark:bg-red-900/20'">
+            <div>
+                <div class="font-semibold text-gray-800 dark:text-gray-200">Dry Run Mode</div>
+                <div class="text-sm" :class="config?.safety?.dry_run ? 'text-yellow-700 dark:text-yellow-300' : 'text-red-700 dark:text-red-300'"
+                     x-text="config?.safety?.dry_run ? 'Enabled \u2014 no files will actually be deleted' : 'Disabled \u2014 executions will permanently delete files!'"></div>
+            </div>
+            <div class="flex items-center space-x-3 flex-shrink-0 ml-4">
+                <span class="text-sm font-bold"
+                      :class="config?.safety?.dry_run ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'"
+                      x-text="config?.safety?.dry_run ? 'SAFE' : 'LIVE'"></span>
+                <button @click="toggleDryRun()" type="button"
+                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2"
+                        :class="config?.safety?.dry_run ? 'bg-yellow-400 focus:ring-yellow-500' : 'bg-red-500 focus:ring-red-500'"
+                        role="switch" :aria-checked="config?.safety?.dry_run">
+                    <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                          :class="config?.safety?.dry_run ? 'translate-x-5' : 'translate-x-0'"></span>
+                </button>
+            </div>
+        </div>
+
         <template x-if="!candidates">
             <div class="text-center py-12">
-                <p class="text-gray-600 dark:text-gray-400 mb-4">No preview available. Click "Refresh List" to see what would be removed.</p>
+                <p class="text-gray-600 dark:text-gray-400 mb-4">No candidates loaded. Click "Refresh List" to see what would be removed.</p>
             </div>
         </template>
 
@@ -148,13 +162,34 @@
                 </div>
 
                 <!-- Execute Removal -->
-                <div class="mt-6 p-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                    <h3 class="text-lg font-semibold text-red-800 dark:text-red-200 mb-4">⚠️ Danger Zone</h3>
-                    <p class="text-sm text-red-700 dark:text-red-300 mb-4">
-                        This action will permanently remove media files from your system if dry run mode is disabled.
+                <div class="mt-6 p-6 rounded-lg border"
+                     :class="config?.safety?.dry_run
+                         ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-400 dark:border-yellow-600'
+                         : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'">
+                    <!-- Dry Run banner (shown inside danger zone when active) -->
+                    <template x-if="config?.safety?.dry_run">
+                        <div class="flex items-center space-x-2 mb-4 p-3 bg-yellow-100 dark:bg-yellow-900/40 border border-yellow-400 rounded-lg">
+                            <svg class="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                            </svg>
+                            <span class="text-sm font-semibold text-yellow-800 dark:text-yellow-200">DRY RUN MODE — no files will actually be deleted when you execute</span>
+                        </div>
+                    </template>
+
+                    <h3 class="text-lg font-semibold mb-4"
+                        :class="config?.safety?.dry_run ? 'text-yellow-800 dark:text-yellow-200' : 'text-red-800 dark:text-red-200'"
+                        x-text="config?.safety?.dry_run ? '🧪 Simulated Removal' : '⚠️ Danger Zone'"></h3>
+                    <p class="text-sm mb-4"
+                       :class="config?.safety?.dry_run ? 'text-yellow-700 dark:text-yellow-300' : 'text-red-700 dark:text-red-300'">
+                        <template x-if="config?.safety?.dry_run">
+                            <span>Dry run is active. Clicking execute will simulate the removal and log what <em>would</em> have been deleted — nothing on disk will change.</span>
+                        </template>
+                        <template x-if="!config?.safety?.dry_run">
+                            <span>This action will <strong>permanently remove media files</strong> from your system.</span>
+                        </template>
                         <template x-if="selectedCandidates.length > 0">
                             <strong class="block mt-2">
-                                You will remove <span x-text="selectedCandidates.length"></span> selected item(s).
+                                <span x-text="selectedCandidates.length"></span> item(s) selected.
                             </strong>
                         </template>
                         <template x-if="selectedCandidates.length === 0">
@@ -165,21 +200,29 @@
                     </p>
                     <div class="flex items-center justify-between">
                         <label class="flex items-center">
-                            <input type="checkbox" x-model="confirmRemoval" class="rounded border-gray-300 text-red-600 focus:ring-red-500">
-                            <span class="ml-2 text-sm font-medium text-red-800 dark:text-red-200">I understand and want to proceed</span>
+                            <input type="checkbox" x-model="confirmRemoval"
+                                   class="rounded border-gray-300 focus:ring-offset-0"
+                                   :class="config?.safety?.dry_run ? 'text-yellow-500 focus:ring-yellow-500' : 'text-red-600 focus:ring-red-500'">
+                            <span class="ml-2 text-sm font-medium"
+                                  :class="config?.safety?.dry_run ? 'text-yellow-800 dark:text-yellow-200' : 'text-red-800 dark:text-red-200'"
+                                  x-text="config?.safety?.dry_run ? 'I understand this is a dry run simulation' : 'I understand and want to proceed'"></span>
                         </label>
-                        <button @click="executeRemoval" 
-                                :disabled="loading || !confirmRemoval || selectedCandidates.length === 0" 
-                                class="btn-danger"
-                                :class="{'opacity-50 cursor-not-allowed': selectedCandidates.length === 0}">
+                        <button @click="executeRemoval"
+                                :disabled="loading || !confirmRemoval || selectedCandidates.length === 0"
+                                class="px-4 py-2 rounded-lg font-semibold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                                :class="config?.safety?.dry_run
+                                    ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
+                                    : 'bg-red-600 hover:bg-red-700 text-white'">
                             <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                             </svg>
                             <span x-show="selectedCandidates.length > 0">
-                                Execute Removal (<span x-text="selectedCandidates.length"></span> selected)
+                                <span x-text="config?.safety?.dry_run ? 'Simulate Removal' : 'Execute Removal'"></span>
+                                (<span x-text="selectedCandidates.length"></span> selected)
                             </span>
                             <span x-show="selectedCandidates.length === 0">
-                                Execute Removal (Select items first)
+                                <span x-text="config?.safety?.dry_run ? 'Simulate Removal' : 'Execute Removal'"></span>
+                                (Select items first)
                             </span>
                         </button>
                     </div>

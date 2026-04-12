@@ -24,6 +24,11 @@ function appData() {
         sortColumn: 'title',
         sortDirection: 'asc',
         toasts: [],
+        connectionStatus: {
+            tautulli: null,
+            radarr: null,
+            sonarr: null,
+        },
 
         async init() {
             await this.loadConfig();
@@ -106,6 +111,44 @@ function appData() {
                 this.showError('Failed to run analysis');
             } finally {
                 this.loading = false;
+            }
+        },
+
+        async testConnection(service) {
+            try {
+                const response = await fetch(`/api/test/${service}`);
+                const data = await response.json();
+                this.connectionStatus[service] = data;
+            } catch (error) {
+                this.connectionStatus[service] = { success: false, message: 'Request failed' };
+            }
+        },
+
+        async testAllConnections() {
+            await Promise.all([
+                this.testConnection('tautulli'),
+                this.testConnection('radarr'),
+                this.testConnection('sonarr'),
+            ]);
+        },
+
+        async toggleDryRun() {
+            this.config.safety.dry_run = !this.config.safety.dry_run;
+            try {
+                await fetch('/api/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config: this.config }),
+                });
+                if (this.config.safety.dry_run) {
+                    this.showSuccess('Dry Run enabled — no files will be deleted');
+                } else {
+                    this.showWarning('⚠️ Dry Run disabled — executions will permanently delete files!', 8000);
+                }
+            } catch (error) {
+                // Revert on failure
+                this.config.safety.dry_run = !this.config.safety.dry_run;
+                this.showError('Failed to save dry run setting');
             }
         },
 
@@ -259,7 +302,7 @@ function appData() {
                 if (data.success) {
                     const isDryRun = this.config?.safety?.dry_run;
                     if (isDryRun) {
-                        this.showWarning(`DRY RUN: Preview completed. ${itemsToRemove.length} item(s) would be removed (no files were actually deleted)`);
+                        this.showWarning(`DRY RUN: ${itemsToRemove.length} item(s) would have been removed (no files were actually deleted)`);
                     } else {
                         this.showSuccess(`Successfully removed ${itemsToRemove.length} item(s)`);
                     }

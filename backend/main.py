@@ -2,6 +2,7 @@
 Media Cleanup UI - FastAPI Backend
 """
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -15,12 +16,11 @@ import yaml
 from backend.core.analyzer import LibraryAnalyzer
 from backend.core.media_remover import MediaRemover
 from backend.api.tautulli import TautulliAPI
+from backend.api.radarr import RadarrAPI
+from backend.api.sonarr import SonarrAPI
+from backend.utils.logging_config import setup_logging
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # Config file path
@@ -95,6 +95,9 @@ def get_default_config() -> Dict[str, Any]:
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     logger.info("Starting Media Cleanup UI backend")
+    if not CONFIG_PATH.exists():
+        logger.info(f"No config file found — writing defaults to {CONFIG_PATH}")
+        save_config(get_default_config())
     yield
     logger.info("Shutting down Media Cleanup UI backend")
 
@@ -214,51 +217,126 @@ async def analyze_library(request: AnalysisRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _make_clean_title(title: str, strip_year: bool = False) -> str:
+    """Lowercase + strip non-alphanumeric, optionally removing a trailing year like '(2009)'."""
+    import re
+    if strip_year:
+        title = re.sub(r'\s*\(\d{4}\)\s*$', '', title)
+    return re.sub(r'[^a-z0-9]', '', title.lower())
+
+
+def _sonarr_radarr_title_keys(raw_title: str, sonarr_clean: str = None) -> set:
+    """Return all lookup keys for a Radarr/Sonarr title.
+
+    We store three variants per entry so we can match regardless of whether
+    Tautulli appended a disambiguation year or not, and regardless of whether
+    Sonarr's own cleanTitle has stop words stripped (which we can't replicate):
+      1. Sonarr/Radarr's own cleanTitle field (their authoritative key)
+      2. Our simple transform with year kept   e.g. 'archer2009'
+      3. Our simple transform with year stripped  e.g. 'archer'
+    """
+    keys = set()
+    if sonarr_clean:
+        keys.add(sonarr_clean)
+    keys.add(_make_clean_title(raw_title, strip_year=False))
+    keys.add(_make_clean_title(raw_title, strip_year=True))
+    return keys
+
+
 @app.get("/api/candidates")
 async def get_removal_candidates():
     """Get list of items that would be removed with current config."""
     try:
         config = load_config()
         analyzer = LibraryAnalyzer(config)
-        
+
+        # Build clean-title lookup sets from Radarr/Sonarr in 2 bulk calls.
+        # These are used to cross-reference Tautulli candidates so stale items
+        # (removed from Plex/Radarr/Sonarr but still in Tautulli history) are
+        # excluded from the list before the user ever sees them.
+        radarr_clean_titles: set = set()
+        sonarr_clean_titles: set = set()
+
+        if config.get('radarr', {}).get('enabled') and config['media'].get('process_movies'):
+            try:
+                radarr = RadarrAPI(config['radarr']['url'], config['radarr']['api_key'])
+                for movie in radarr.get_movies():
+                    radarr_clean_titles.update(
+                        _sonarr_radarr_title_keys(movie.get('title', ''), movie.get('cleanTitle'))
+                    )
+                logger.info(f"Loaded {len(radarr_clean_titles)} Radarr title keys for cross-reference")
+            except Exception as e:
+                logger.warning(f"Could not load Radarr titles for cross-reference: {e}")
+
+        if config.get('sonarr', {}).get('enabled') and config['media'].get('process_tv_shows'):
+            try:
+                sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
+                for series in sonarr.get_series():
+                    sonarr_clean_titles.update(
+                        _sonarr_radarr_title_keys(series.get('title', ''), series.get('cleanTitle'))
+                    )
+                logger.info(f"Loaded {len(sonarr_clean_titles)} Sonarr title keys for cross-reference")
+            except Exception as e:
+                logger.warning(f"Could not load Sonarr titles for cross-reference: {e}")
+
         libraries = analyzer.tautulli.get_libraries()
         candidates = []
-        
+        stale_count = 0
+
         for library in libraries:
             library_type = library.get('section_type', 'Unknown')
             library_id = library.get('section_id')
             library_name = library.get('section_name', 'Unknown')
-            
+
             if library_type == 'movie' and not config['media'].get('process_movies', True):
                 continue
             if library_type == 'show' and not config['media'].get('process_tv_shows', True):
                 continue
-            
+
             media_response = analyzer.tautulli.get_library_media_info(library_id, length=10000)
             media_items = media_response.get('data', []) if isinstance(media_response, dict) else media_response
-            
+
             for item in media_items:
-                if analyzer.filter.is_old_enough(
+                if not analyzer.filter.is_old_enough(
                     item.get('last_played'),
                     item.get('added_at'),
                     item.get('play_count'),
                     item_data=item
                 ):
-                    candidates.append({
-                        'library_type': library_type,
-                        'library_name': library_name,
-                        'title': item.get('title', ''),
-                        'year': item.get('year'),
-                        'last_played': item.get('last_played'),
-                        'added_at': item.get('added_at'),
-                        'play_count': item.get('play_count', 0),
-                        'rating_key': item.get('rating_key'),
-                        'file_size': item.get('file_size', 0),
-                        'total_duration': item.get('total_duration', 0)
-                    })
-        
+                    continue
+
+                # Cross-reference: skip items no longer present in Radarr/Sonarr.
+                # Try both with-year and without-year variants of the Tautulli title — Tautulli
+                # sometimes appends a disambiguation year that Sonarr may or may not include.
+                title = item.get('title', '')
+                tautulli_keys = _sonarr_radarr_title_keys(title)  # no authoritative cleanTitle here
+                if library_type == 'movie' and radarr_clean_titles and not tautulli_keys & radarr_clean_titles:
+                    logger.debug(f"Cross-ref filtered movie: {title!r} -> keys={tautulli_keys!r}")
+                    stale_count += 1
+                    continue
+                if library_type == 'show' and sonarr_clean_titles and not tautulli_keys & sonarr_clean_titles:
+                    logger.debug(f"Cross-ref filtered show: {title!r} -> keys={tautulli_keys!r}")
+                    stale_count += 1
+                    continue
+
+                candidates.append({
+                    'library_type': library_type,
+                    'library_name': library_name,
+                    'title': title,
+                    'year': item.get('year'),
+                    'last_played': item.get('last_played'),
+                    'added_at': item.get('added_at'),
+                    'play_count': item.get('play_count', 0),
+                    'rating_key': item.get('rating_key'),
+                    'file_size': item.get('file_size', 0),
+                    'total_duration': item.get('total_duration', 0)
+                })
+
+        if stale_count:
+            logger.info(f"Cross-reference filtered {stale_count} stale Tautulli item(s) not found in Radarr/Sonarr")
+
         return {"success": True, "data": candidates}
-        
+
     except Exception as e:
         logger.error(f"Error getting candidates: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -351,6 +429,48 @@ async def get_libraries():
     except Exception as e:
         logger.error(f"Error getting libraries: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/test/tautulli")
+async def test_tautulli():
+    """Test Tautulli connection using saved config."""
+    try:
+        config = load_config()
+        tautulli = TautulliAPI(config['tautulli']['url'], config['tautulli']['api_key'])
+        libraries = tautulli.get_libraries()
+        count = len(libraries)
+        return {"success": True, "message": f"Connected \u2014 {count} librar{'ies' if count != 1 else 'y'} found"}
+    except Exception as e:
+        logger.warning(f"Tautulli connection test failed: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@app.get("/api/test/radarr")
+async def test_radarr():
+    """Test Radarr connection using saved config."""
+    try:
+        config = load_config()
+        radarr = RadarrAPI(config['radarr']['url'], config['radarr']['api_key'])
+        status = radarr._make_request('system/status')
+        version = status.get('version', 'unknown') if status else 'unknown'
+        return {"success": True, "message": f"Connected \u2014 Radarr v{version}"}
+    except Exception as e:
+        logger.warning(f"Radarr connection test failed: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@app.get("/api/test/sonarr")
+async def test_sonarr():
+    """Test Sonarr connection using saved config."""
+    try:
+        config = load_config()
+        sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
+        status = sonarr._make_request('system/status')
+        version = status.get('version', 'unknown') if status else 'unknown'
+        return {"success": True, "message": f"Connected \u2014 Sonarr v{version}"}
+    except Exception as e:
+        logger.warning(f"Sonarr connection test failed: {e}")
+        return {"success": False, "message": str(e)}
 
 
 # Helper functions
