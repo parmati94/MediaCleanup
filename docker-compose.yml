@@ -8,6 +8,7 @@ services:
       - "5180:80"
     volumes:
       - ./data/config.yaml:/app/data/config.yaml
+      - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/health"]
@@ -17,3 +18,4 @@ services:
       start_period: 10s
     environment:
       - TZ=America/New_York
+      - LOG_LEVEL=info
