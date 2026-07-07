@@ -69,12 +69,7 @@
                             class="px-4 py-2 border-b-2 font-medium text-sm transition">
                         Analysis
                     </button>
-                    <button @click="currentTab = 'config'" 
-                            :class="currentTab === 'config' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                            class="px-4 py-2 border-b-2 font-medium text-sm transition">
-                        Configuration
-                    </button>
-                    <button @click="currentTab = 'removal'" 
+                    <button @click="currentTab = 'removal'"
                             :class="currentTab === 'removal' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                             class="px-4 py-2 border-b-2 font-medium text-sm transition">
                         Removal
@@ -92,16 +87,13 @@
                 {{> analysis-tab}}
             </div>
 
-            <!-- Configuration Tab -->
-            <div x-show="currentTab === 'config'" x-cloak>
-                {{> config-tab}}
-            </div>
-
             <!-- Removal Tab -->
             <div x-show="currentTab === 'removal'" x-cloak>
                 {{> removal-tab}}
             </div>
         </main>
+
+        {{> settings-modal}}
 
         {{> footer}}
     </div>

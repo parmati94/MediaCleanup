@@ -1,0 +1,132 @@
+<!-- Settings Modal -->
+<div x-show="settingsOpen" x-cloak
+     class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8"
+     x-transition.opacity
+     @keydown.escape.window="settingsOpen = false">
+    <div class="fixed inset-0 bg-black/50"></div>
+    <div class="relative w-full max-w-2xl bg-white dark:bg-gray-800 rounded-xl shadow-2xl my-4">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center space-x-2">
+                <svg class="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white">Settings</h2>
+            </div>
+            <button @click="settingsOpen = false" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Body -->
+        <template x-if="config">
+            <div class="px-6 py-5 space-y-8 max-h-[70vh] overflow-y-auto">
+                <!-- Connections -->
+                <div class="space-y-6">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">Connections</h3>
+                        <button type="button" @click="testAllConnections()" class="btn-secondary text-sm py-1.5 px-3">Test all</button>
+                    </div>
+
+                    <!-- Tautulli -->
+                    <div>
+                        <h4 class="font-medium text-gray-700 dark:text-gray-300 mb-2">Tautulli</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                                <label class="label">URL</label>
+                                <input type="text" x-model="config.tautulli.url" class="input-field" placeholder="http://localhost:8181">
+                            </div>
+                            <div>
+                                <label class="label">API Key</label>
+                                <input type="password" x-model="config.tautulli.api_key" class="input-field">
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-3 mt-2">
+                            <button type="button" @click="testConnection('tautulli')" class="btn-secondary text-sm py-1.5 px-3">Test</button>
+                            <span x-show="connectionStatus.tautulli !== null"
+                                  :class="connectionStatus.tautulli?.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                                  class="text-sm font-medium" x-text="connectionStatus.tautulli?.message"></span>
+                        </div>
+                    </div>
+
+                    <!-- Sonarr -->
+                    <div>
+                        <label class="flex items-center mb-2">
+                            <input type="checkbox" x-model="config.sonarr.enabled" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                            <span class="ml-2 font-medium text-gray-700 dark:text-gray-300">Sonarr</span>
+                        </label>
+                        <div class="space-y-3 pl-6" x-show="config.sonarr.enabled">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label class="label">URL</label>
+                                    <input type="text" x-model="config.sonarr.url" class="input-field" placeholder="http://localhost:8989">
+                                </div>
+                                <div>
+                                    <label class="label">API Key</label>
+                                    <input type="password" x-model="config.sonarr.api_key" class="input-field">
+                                </div>
+                            </div>
+                            <label class="flex items-center">
+                                <input type="checkbox" x-model="config.sonarr.delete_files" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                                <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Delete files from disk</span>
+                            </label>
+                            <div class="flex items-center space-x-3">
+                                <button type="button" @click="testConnection('sonarr')" class="btn-secondary text-sm py-1.5 px-3">Test</button>
+                                <span x-show="connectionStatus.sonarr !== null"
+                                      :class="connectionStatus.sonarr?.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                                      class="text-sm font-medium" x-text="connectionStatus.sonarr?.message"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Radarr -->
+                    <div>
+                        <label class="flex items-center mb-2">
+                            <input type="checkbox" x-model="config.radarr.enabled" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                            <span class="ml-2 font-medium text-gray-700 dark:text-gray-300">Radarr</span>
+                        </label>
+                        <div class="space-y-3 pl-6" x-show="config.radarr.enabled">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label class="label">URL</label>
+                                    <input type="text" x-model="config.radarr.url" class="input-field" placeholder="http://localhost:7878">
+                                </div>
+                                <div>
+                                    <label class="label">API Key</label>
+                                    <input type="password" x-model="config.radarr.api_key" class="input-field">
+                                </div>
+                            </div>
+                            <label class="flex items-center">
+                                <input type="checkbox" x-model="config.radarr.delete_files" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                                <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Delete files from disk</span>
+                            </label>
+                            <div class="flex items-center space-x-3">
+                                <button type="button" @click="testConnection('radarr')" class="btn-secondary text-sm py-1.5 px-3">Test</button>
+                                <span x-show="connectionStatus.radarr !== null"
+                                      :class="connectionStatus.radarr?.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                                      class="text-sm font-medium" x-text="connectionStatus.radarr?.message"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Safety -->
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3">Safety</h3>
+                    <label class="label">Max Items Per Run</label>
+                    <input type="number" x-model.number="config.safety.max_items_per_run" class="input-field w-40">
+                    <p class="text-xs text-gray-500 mt-1">Hard cap on how many items a single removal can delete.</p>
+                </div>
+            </div>
+        </template>
+
+        <!-- Footer -->
+        <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700">
+            <button @click="settingsOpen = false" class="btn-secondary">Cancel</button>
+            <button @click="saveSettings()" :disabled="loading" class="btn-primary">Save</button>
+        </div>
+    </div>
+</div>

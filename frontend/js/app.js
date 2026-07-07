@@ -15,6 +15,7 @@ function appData() {
         analysisSection: 'space-consumers',
         loading: false,
         refreshing: false,
+        settingsOpen: false,
         config: null,
         analysis: null,
         candidates: null,
@@ -29,6 +30,30 @@ function appData() {
             tautulli: null,
             radarr: null,
             sonarr: null,
+        },
+
+        // --- Removal-filter derived controls (friendly UI <-> raw config) ---
+        get mediaType() {
+            const m = this.config?.media?.process_movies;
+            const t = this.config?.media?.process_tv_shows;
+            if (m && t) return 'both';
+            if (m) return 'movies';
+            if (t) return 'tv';
+            return 'none';
+        },
+        setMediaType(type) {
+            if (!this.config?.media) return;
+            this.config.media.process_movies = (type === 'both' || type === 'movies');
+            this.config.media.process_tv_shows = (type === 'both' || type === 'tv');
+        },
+        get minSizeGB() {
+            const b = this.config?.media?.filters?.min_file_size_to_keep || 0;
+            return b ? Math.round((b / (1024 ** 3)) * 100) / 100 : 0;
+        },
+        set minSizeGB(v) {
+            if (this.config?.media?.filters) {
+                this.config.media.filters.min_file_size_to_keep = Math.round((v || 0) * (1024 ** 3));
+            }
         },
 
         async init() {
@@ -117,6 +142,35 @@ function appData() {
             } finally {
                 this.loading = false;
                 this.refreshing = false;
+            }
+        },
+
+        async saveSettings() {
+            await this.saveConfig();
+            this.settingsOpen = false;
+        },
+
+        async applyFilters() {
+            this.updateProtectedKeywords();
+            this.loading = true;
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config: this.config }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.showSuccess('Filters applied');
+                    await this.loadCandidates();
+                } else {
+                    this.showError('Failed to apply filters');
+                }
+            } catch (error) {
+                console.error('Error applying filters:', error);
+                this.showError('Failed to apply filters');
+            } finally {
+                this.loading = false;
             }
         },
 

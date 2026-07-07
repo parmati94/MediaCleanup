@@ -3,14 +3,15 @@
         <div class="flex justify-between items-center mb-6">
             <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Library Analysis & Insights</h2>
             <div class="flex items-center gap-2">
-                <button @click="runAnalysis(true, true)" :disabled="loading"
-                        title="Re-scan the library from Plex (via Tautulli) before analyzing. Drops deleted items and updates file sizes. Slower than a normal refresh."
-                        class="btn-secondary">
-                    <svg class="inline-block w-5 h-5 mr-2" :class="refreshing ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                    </svg>
-                    <span x-text="refreshing ? 'Refreshing from Plex…' : 'Refresh Library Data'"></span>
-                </button>
+                <div class="relative group">
+                    <button @click="runAnalysis(true, true)" :disabled="loading" aria-label="Refresh Library Data" class="btn-secondary">
+                        <svg class="inline-block w-5 h-5 mr-2" :class="refreshing ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        <span x-text="refreshing ? 'Refreshing from Plex…' : 'Refresh Library Data'"></span>
+                    </button>
+                    <span class="pointer-events-none absolute right-0 top-full mt-1 z-50 w-64 rounded-md bg-gray-900 text-white text-xs px-2 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">Re-scans the library from Plex, dropping deleted items and updating sizes. Slower than a normal refresh.</span>
+                </div>
                 <button @click="runAnalysis(true)" :disabled="loading" class="btn-primary">
                     <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
