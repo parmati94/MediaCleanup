@@ -14,6 +14,7 @@ function appData() {
         currentTab: 'dashboard',
         analysisSection: 'space-consumers',
         loading: false,
+        refreshing: false,
         config: null,
         analysis: null,
         candidates: null,
@@ -89,8 +90,11 @@ function appData() {
             }
         },
 
-        async runAnalysis(includeThresholds) {
+        async runAnalysis(includeThresholds, refresh = false) {
             this.loading = true;
+            // refresh=true forces Tautulli to rebuild media info from Plex first
+            // (drops deleted items). It's noticeably slower, so surface that state.
+            this.refreshing = refresh;
             try {
                 const response = await fetch('/api/analyze', {
                     method: 'POST',
@@ -99,7 +103,8 @@ function appData() {
                     },
                     body: JSON.stringify({
                         summary_only: false,
-                        test_thresholds: includeThresholds
+                        test_thresholds: includeThresholds,
+                        refresh: refresh
                     }),
                 });
                 const data = await response.json();
@@ -111,6 +116,7 @@ function appData() {
                 this.showError('Failed to run analysis');
             } finally {
                 this.loading = false;
+                this.refreshing = false;
             }
         },
 

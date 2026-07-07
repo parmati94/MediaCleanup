@@ -130,6 +130,9 @@ class AnalysisRequest(BaseModel):
     """Model for analysis requests."""
     summary_only: bool = False
     test_thresholds: bool = False
+    # When True, force Tautulli to rebuild its media info tables from Plex before
+    # reading them (drops deleted items / updates sizes). Slower; used on demand.
+    refresh: bool = False
 
 
 class RemovalRequest(BaseModel):
@@ -189,15 +192,20 @@ async def analyze_library(request: AnalysisRequest):
             if library_type == 'show' and not config['media'].get('process_tv_shows', True):
                 continue
             
-            media_response = analyzer.tautulli.get_library_media_info(library_id, length=10000)
+            media_response = analyzer.tautulli.get_library_media_info(library_id, length=10000, refresh=request.refresh)
             media_items = media_response.get('data', []) if isinstance(media_response, dict) else media_response
-            
+
             for item in media_items:
                 item['library_type'] = library_type
                 item['library_name'] = library.get('section_name', 'Unknown')
-            
+
             all_items.extend(media_items)
         
+        # Overlay authoritative on-disk sizes from Radarr/Sonarr (Tautulli's
+        # media-info sizes blank out on refresh; *arr sizes never go stale).
+        movie_sizes, show_sizes = _load_arr_sizes(config)
+        _overlay_file_sizes(all_items, movie_sizes, show_sizes)
+
         # Calculate statistics
         result = {
             'total_items': len(all_items),
@@ -243,6 +251,85 @@ def _sonarr_radarr_title_keys(raw_title: str, sonarr_clean: str = None) -> set:
     return keys
 
 
+def _load_arr_sizes(config: Dict[str, Any]) -> tuple:
+    """Build exact on-disk size maps from Radarr and Sonarr.
+
+    Radarr/Sonarr report authoritative file sizes that never go stale, so we
+    use these instead of Tautulli's media-info sizes (which blank out whenever
+    the media-info table is refreshed - TV show aggregate sizes especially).
+
+    Returns (movie_sizes, show_sizes). Each is a dict with:
+      'by_title_year': {(clean_title_no_year, year_str): size_bytes}  # primary
+      'by_key':        {clean_title_key: size_bytes}                  # fallback
+    The 'by_key' keys use the same scheme as the stale cross-reference, so its
+    key set doubles as the Radarr/Sonarr title lookup used there.
+    """
+    def build(items: List[Dict[str, Any]]) -> Dict[str, dict]:
+        by_ty: dict = {}
+        by_key: dict = {}
+        for it in items:
+            title = it.get('title', '') or ''
+            # Radarr movies expose sizeOnDisk at top level; Sonarr series nest it
+            # under statistics.
+            size = it.get('sizeOnDisk')
+            if size is None:
+                size = (it.get('statistics') or {}).get('sizeOnDisk')
+            if not size:
+                continue
+            ct = _make_clean_title(title, strip_year=True)
+            if ct:
+                by_ty[(ct, str(it.get('year')))] = size
+            for k in _sonarr_radarr_title_keys(title, it.get('cleanTitle')):
+                if k:
+                    by_key.setdefault(k, size)
+        return {'by_title_year': by_ty, 'by_key': by_key}
+
+    empty = {'by_title_year': {}, 'by_key': {}}
+    movie_sizes, show_sizes = dict(empty), dict(empty)
+
+    if config.get('radarr', {}).get('enabled'):
+        try:
+            radarr = RadarrAPI(config['radarr']['url'], config['radarr']['api_key'])
+            movie_sizes = build(radarr.get_movies())
+            logger.info(f"Loaded {len(movie_sizes['by_title_year'])} Radarr movie sizes")
+        except Exception as e:
+            logger.warning(f"Could not load Radarr sizes: {e}")
+
+    if config.get('sonarr', {}).get('enabled'):
+        try:
+            sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
+            show_sizes = build(sonarr.get_series())
+            logger.info(f"Loaded {len(show_sizes['by_title_year'])} Sonarr series sizes")
+        except Exception as e:
+            logger.warning(f"Could not load Sonarr sizes: {e}")
+
+    return movie_sizes, show_sizes
+
+
+def _overlay_file_sizes(items: List[Dict[str, Any]], movie_sizes: dict, show_sizes: dict) -> int:
+    """Replace each item's file_size with the exact Radarr/Sonarr on-disk size.
+
+    Matches on (clean title, year) first, then falls back to any clean-title key.
+    Items with no match keep whatever file_size they already had. Mutates items
+    in place; returns the number of items matched.
+    """
+    matched = 0
+    for item in items:
+        maps = movie_sizes if item.get('library_type') == 'movie' else show_sizes
+        title = item.get('title', '') or ''
+        size = maps['by_title_year'].get((_make_clean_title(title, strip_year=True), str(item.get('year'))))
+        if size is None:
+            for k in _sonarr_radarr_title_keys(title):
+                if k in maps['by_key']:
+                    size = maps['by_key'][k]
+                    break
+        if size is not None:
+            item['file_size'] = size
+            matched += 1
+    logger.info(f"Overlaid Radarr/Sonarr sizes onto {matched}/{len(items)} items")
+    return matched
+
+
 @app.get("/api/candidates")
 async def get_removal_candidates():
     """Get list of items that would be removed with current config."""
@@ -250,34 +337,13 @@ async def get_removal_candidates():
         config = load_config()
         analyzer = LibraryAnalyzer(config)
 
-        # Build clean-title lookup sets from Radarr/Sonarr in 2 bulk calls.
-        # These are used to cross-reference Tautulli candidates so stale items
-        # (removed from Plex/Radarr/Sonarr but still in Tautulli history) are
-        # excluded from the list before the user ever sees them.
-        radarr_clean_titles: set = set()
-        sonarr_clean_titles: set = set()
-
-        if config.get('radarr', {}).get('enabled') and config['media'].get('process_movies'):
-            try:
-                radarr = RadarrAPI(config['radarr']['url'], config['radarr']['api_key'])
-                for movie in radarr.get_movies():
-                    radarr_clean_titles.update(
-                        _sonarr_radarr_title_keys(movie.get('title', ''), movie.get('cleanTitle'))
-                    )
-                logger.info(f"Loaded {len(radarr_clean_titles)} Radarr title keys for cross-reference")
-            except Exception as e:
-                logger.warning(f"Could not load Radarr titles for cross-reference: {e}")
-
-        if config.get('sonarr', {}).get('enabled') and config['media'].get('process_tv_shows'):
-            try:
-                sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
-                for series in sonarr.get_series():
-                    sonarr_clean_titles.update(
-                        _sonarr_radarr_title_keys(series.get('title', ''), series.get('cleanTitle'))
-                    )
-                logger.info(f"Loaded {len(sonarr_clean_titles)} Sonarr title keys for cross-reference")
-            except Exception as e:
-                logger.warning(f"Could not load Sonarr titles for cross-reference: {e}")
+        # Load exact Radarr/Sonarr on-disk sizes once. The size-map key set
+        # doubles as the clean-title lookup used to cross-reference Tautulli
+        # candidates so stale items (removed from Plex/Radarr/Sonarr but still
+        # in Tautulli history) are excluded before the user ever sees them.
+        movie_sizes, show_sizes = _load_arr_sizes(config)
+        radarr_clean_titles: set = set(movie_sizes['by_key'].keys())
+        sonarr_clean_titles: set = set(show_sizes['by_key'].keys())
 
         libraries = analyzer.tautulli.get_libraries()
         candidates = []
@@ -331,6 +397,9 @@ async def get_removal_candidates():
                     'file_size': item.get('file_size', 0),
                     'total_duration': item.get('total_duration', 0)
                 })
+
+        # Replace Tautulli's (possibly-blank) sizes with exact Radarr/Sonarr sizes.
+        _overlay_file_sizes(candidates, movie_sizes, show_sizes)
 
         if stale_count:
             logger.info(f"Cross-reference filtered {stale_count} stale Tautulli item(s) not found in Radarr/Sonarr")
