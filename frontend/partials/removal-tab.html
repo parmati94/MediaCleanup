@@ -148,12 +148,12 @@
                             </tr>
                         </thead>
                         <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                            <template x-for="item in filteredCandidates()" :key="item.rating_key">
+                            <template x-for="item in filteredCandidates()" :key="item.id">
                                 <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
                                     <td class="px-6 py-4">
-                                        <input type="checkbox" 
-                                               :checked="isSelected(item.rating_key)"
-                                               @click="toggleSelection(item.rating_key)"
+                                        <input type="checkbox"
+                                               :checked="isSelected(item.id)"
+                                               @click="toggleSelection(item.id)"
                                                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
                                     </td>
                                     <td class="px-6 py-4 text-sm text-gray-900 dark:text-white" x-text="item.title"></td>

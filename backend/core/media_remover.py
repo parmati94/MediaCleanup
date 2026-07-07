@@ -203,6 +203,65 @@ class MediaRemover:
             logging.error(f"Error during selective removal process: {e}")
             return False
 
+    def remove_by_ids(self, ids: List[str]) -> bool:
+        """Remove specific items by 'type:arr_id' handles (e.g. 'movie:123', 'show:45').
+
+        Deletes directly via Radarr/Sonarr by id - no Tautulli lookup or fuzzy title
+        matching. Honors the configured dry_run and delete_files settings. In dry_run
+        it only logs what would be removed and deletes nothing.
+        """
+        logging.info(f"Starting selective removal of {len(ids)} items by id...")
+
+        dry_run = self.config.get('safety', {}).get('dry_run', False)
+        if dry_run:
+            logging.info("DRY RUN MODE: No items will actually be removed")
+
+        success_count = 0
+        for handle in ids:
+            try:
+                lib, _, raw = str(handle).partition(':')
+                arr_id = int(raw)
+            except (ValueError, TypeError):
+                logging.warning(f"Skipping malformed removal id: {handle!r}")
+                continue
+
+            if lib == 'movie':
+                if not (self.radarr and self.config.get('radarr', {}).get('enabled')):
+                    logging.warning(f"Cannot remove movie id {arr_id} - Radarr is disabled")
+                    continue
+                if dry_run:
+                    logging.info(f"Would remove movie (Radarr id {arr_id})")
+                    success_count += 1
+                    continue
+                if self.radarr.delete_movie(arr_id,
+                                            delete_files=self.config['radarr']['delete_files'],
+                                            add_exclusion=self.config['radarr']['add_to_exclusion']):
+                    logging.info(f"Removed movie from Radarr (id {arr_id})")
+                    success_count += 1
+                else:
+                    logging.warning(f"Failed to remove movie from Radarr (id {arr_id})")
+
+            elif lib == 'show':
+                if not (self.sonarr and self.config.get('sonarr', {}).get('enabled')):
+                    logging.warning(f"Cannot remove show id {arr_id} - Sonarr is disabled")
+                    continue
+                if dry_run:
+                    logging.info(f"Would remove series (Sonarr id {arr_id})")
+                    success_count += 1
+                    continue
+                if self.sonarr.delete_series(arr_id,
+                                             delete_files=self.config['sonarr']['delete_files'],
+                                             add_exclusion=self.config['sonarr']['add_to_exclusion']):
+                    logging.info(f"Removed series from Sonarr (id {arr_id})")
+                    success_count += 1
+                else:
+                    logging.warning(f"Failed to remove series from Sonarr (id {arr_id})")
+            else:
+                logging.warning(f"Unknown media type in removal id: {handle!r}")
+
+        logging.info(f"Removal by id completed. {success_count}/{len(ids)} processed")
+        return success_count == len(ids)
+
     def _process_library(self, library_id: int, library_name: str, library_type: str) -> List[Dict[str, Any]]:
         """Process a single library and return removal candidates.
         

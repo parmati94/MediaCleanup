@@ -244,7 +244,7 @@ function appData() {
             if (this.selectedCandidates.length === filtered.length) {
                 this.selectedCandidates = [];
             } else {
-                this.selectedCandidates = filtered.map(c => c.rating_key);
+                this.selectedCandidates = filtered.map(c => c.id);
             }
         },
         
@@ -363,9 +363,9 @@ function appData() {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         confirm: true,
-                        rating_keys: itemsToRemove
+                        ids: itemsToRemove
                     }),
                 });
                 const data = await response.json();

@@ -97,104 +97,107 @@ class MediaFilter:
         filters = self.config['media'].get('filters', {})
         title = item_data.get('title', '').lower()
         year = item_data.get('year')
-        
-        # Get detailed metadata for this item if we need ratings/genres
+
+        # Prefer authoritative fields already on the item (from Radarr/Sonarr); only
+        # fall back to Tautulli metadata (legacy path) when a needed field is missing.
+        rating = item_data.get('rating')
+        audience_rating = item_data.get('audience_rating')
+        genres = item_data.get('genres')
+        file_size = item_data.get('file_size')
+
         rating_key = item_data.get('rating_key')
-        metadata = None
-        
-        # Check if we need metadata for any filters
         needs_metadata = (
-            filters.get('min_rating_to_keep', 0) > 0 or
-            filters.get('min_audience_rating_to_keep', 0) > 0 or
-            filters.get('protected_genres', []) or
-            filters.get('protected_resolutions', []) or
-            filters.get('min_file_size_to_keep', 0) > 0
+            (filters.get('min_rating_to_keep', 0) > 0 and rating is None) or
+            (filters.get('min_audience_rating_to_keep', 0) > 0 and audience_rating is None) or
+            (filters.get('protected_genres', []) and not genres) or
+            (filters.get('min_file_size_to_keep', 0) > 0 and not file_size)
         )
-        
         if needs_metadata and rating_key:
             try:
-                metadata = self.tautulli.get_metadata(rating_key)
+                metadata = self.tautulli.get_metadata(rating_key) or {}
             except Exception as e:
                 logging.warning(f"Could not get metadata for {title}: {e}")
                 metadata = {}
-        
+            if rating is None:
+                rating = metadata.get('rating')
+            if audience_rating is None:
+                audience_rating = metadata.get('audience_rating')
+            if not genres:
+                genres = metadata.get('genre')
+            if not file_size:
+                for media in metadata.get('media_info', []) or []:
+                    for part in media.get('parts', []) or []:
+                        try:
+                            file_size = max(int(file_size or 0), int(part.get('size') or 0))
+                        except (ValueError, TypeError):
+                            pass
+
         # Check protected keywords in title
         protected_keywords = filters.get('protected_keywords', [])
         for keyword in protected_keywords:
             if keyword.lower() in title:
                 logging.debug(f"Protecting by keyword '{keyword}': {item_data.get('title', 'Unknown')}")
                 return False
-        
+
         # Check year-based protections
         if year:
             try:
                 year_int = int(year)
-                
-                # Protect classics
+
                 protect_before = filters.get('protect_classics_before_year', 0)
                 if protect_before > 0 and year_int <= protect_before:
-                    logging.debug(f"Protecting classic: {item_data.get('title', 'Unknown')} ({year}) - Before {protect_before}")
+                    logging.debug(f"Protecting classic: {item_data.get('title', 'Unknown')} ({year})")
                     return False
-                
-                # Protect recent releases
+
                 protect_after = filters.get('protect_recent_after_year', 0)
                 if protect_after > 0 and year_int >= protect_after:
-                    logging.debug(f"Protecting recent release: {item_data.get('title', 'Unknown')} ({year}) - After {protect_after}")
+                    logging.debug(f"Protecting recent release: {item_data.get('title', 'Unknown')} ({year})")
                     return False
-                    
             except (ValueError, TypeError):
                 pass
-        
-        # Check ratings if we have metadata
-        if metadata:
-            # Check critic rating
-            min_rating = filters.get('min_rating_to_keep', 0)
-            if min_rating > 0:
-                rating = metadata.get('rating')
-                if rating and float(rating) >= min_rating:
+
+        # Critic rating
+        min_rating = filters.get('min_rating_to_keep', 0)
+        if min_rating > 0 and rating:
+            try:
+                if float(rating) >= min_rating:
                     logging.debug(f"Protecting by critic rating ({rating}): {item_data.get('title', 'Unknown')}")
                     return False
-            
-            # Check audience rating
-            min_audience_rating = filters.get('min_audience_rating_to_keep', 0)
-            if min_audience_rating > 0:
-                audience_rating = metadata.get('audience_rating')
-                if audience_rating and float(audience_rating) >= min_audience_rating:
+            except (ValueError, TypeError):
+                pass
+
+        # Audience rating
+        min_audience_rating = filters.get('min_audience_rating_to_keep', 0)
+        if min_audience_rating > 0 and audience_rating:
+            try:
+                if float(audience_rating) >= min_audience_rating:
                     logging.debug(f"Protecting by audience rating ({audience_rating}): {item_data.get('title', 'Unknown')}")
                     return False
-            
-            # Check protected genres
-            protected_genres = [g.lower() for g in filters.get('protected_genres', [])]
-            if protected_genres:
-                item_genres = metadata.get('genre', [])
-                if isinstance(item_genres, str):
-                    item_genres = [item_genres]
-                
-                for genre in item_genres:
-                    if isinstance(genre, dict):
-                        genre_name = genre.get('tag', '').lower()
-                    else:
-                        genre_name = str(genre).lower()
-                    
-                    if genre_name in protected_genres:
-                        logging.debug(f"Protecting by genre '{genre_name}': {item_data.get('title', 'Unknown')}")
-                        return False
-            
-            # Check file size protection
-            min_file_size = filters.get('min_file_size_to_keep', 0)
-            if min_file_size > 0:
-                media_info = metadata.get('media_info', [])
-                if media_info:
-                    for media in media_info:
-                        parts = media.get('parts', [])
-                        for part in parts:
-                            file_size = part.get('size')
-                            if file_size and int(file_size) >= min_file_size:
-                                size_gb = int(file_size) / (1024**3)
-                                logging.debug(f"Protecting by file size ({size_gb:.1f}GB): {item_data.get('title', 'Unknown')}")
-                                return False
-        
-        # If we get here, the item is not protected and can be removed
+            except (ValueError, TypeError):
+                pass
+
+        # Protected genres
+        protected_genres = [g.lower() for g in filters.get('protected_genres', [])]
+        if protected_genres and genres:
+            if isinstance(genres, str):
+                genres = [genres]
+            for genre in genres:
+                genre_name = genre.get('tag', '').lower() if isinstance(genre, dict) else str(genre).lower()
+                if genre_name in protected_genres:
+                    logging.debug(f"Protecting by genre '{genre_name}': {item_data.get('title', 'Unknown')}")
+                    return False
+
+        # File size protection
+        min_file_size = filters.get('min_file_size_to_keep', 0)
+        if min_file_size > 0 and file_size:
+            try:
+                if int(file_size) >= min_file_size:
+                    logging.debug(f"Protecting by file size: {item_data.get('title', 'Unknown')}")
+                    return False
+            except (ValueError, TypeError):
+                pass
+
+        # Not protected - can be removed
         return True
 
     @staticmethod

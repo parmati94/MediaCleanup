@@ -138,7 +138,8 @@ class AnalysisRequest(BaseModel):
 class RemovalRequest(BaseModel):
     """Model for removal requests."""
     confirm: bool = False
-    rating_keys: Optional[List[str]] = None
+    ids: Optional[List[str]] = None          # "movie:123" / "show:45" (preferred)
+    rating_keys: Optional[List[str]] = None  # legacy Tautulli rating keys
 
 
 # API Endpoints
@@ -178,52 +179,16 @@ async def analyze_library(request: AnalysisRequest):
         config = load_config()
         analyzer = LibraryAnalyzer(config)
         
-        # Collect analysis data
-        libraries = analyzer.tautulli.get_libraries()
-        all_items = []
-        
-        for library in libraries:
-            library_type = library.get('section_type', 'Unknown')
-            library_id = library.get('section_id')
-            
-            # Skip based on configuration
-            if library_type == 'movie' and not config['media'].get('process_movies', True):
-                continue
-            if library_type == 'show' and not config['media'].get('process_tv_shows', True):
-                continue
-            
-            media_response = analyzer.tautulli.get_library_media_info(library_id, length=10000, refresh=request.refresh)
-            media_items = media_response.get('data', []) if isinstance(media_response, dict) else media_response
-
-            for item in media_items:
-                item['library_type'] = library_type
-                item['library_name'] = library.get('section_name', 'Unknown')
-
-            all_items.extend(media_items)
-        
-        # Overlay authoritative on-disk sizes from Radarr/Sonarr (Tautulli's
-        # media-info sizes blank out on refresh; *arr sizes never go stale).
-        movie_sizes, show_sizes = _load_arr_sizes(config)
-        _overlay_file_sizes(all_items, movie_sizes, show_sizes)
-        # Same cross-reference keys the candidates endpoint uses, so the
-        # dashboard impact numbers match the Removal page.
-        radarr_keys = set(movie_sizes['by_key'].keys())
-        sonarr_keys = set(show_sizes['by_key'].keys())
-        # True managed-library size straight from Radarr/Sonarr (authoritative on-disk
-        # totals), respecting which library types are enabled. Tautulli's cached
-        # media-info table can lag behind new media, so we don't total from it.
-        library_size = 0
-        if config['media'].get('process_movies', True):
-            library_size += movie_sizes.get('total', 0)
-        if config['media'].get('process_tv_shows', True):
-            library_size += show_sizes.get('total', 0)
+        # Item universe from Radarr/Sonarr (authoritative catalog) joined with
+        # Tautulli watch history - no dependence on Tautulli's cached media_info table.
+        all_items, library_size = _build_catalog(config)
 
         # Calculate statistics
         result = {
             'total_items': len(all_items),
             'watch_status': _calculate_watch_status(all_items),
             'age_distribution': _calculate_age_distribution(all_items),
-            'current_config_impact': _calculate_config_impact(all_items, analyzer, radarr_keys, sonarr_keys, library_size),
+            'current_config_impact': _calculate_config_impact(all_items, analyzer, library_size=library_size),
             'top_lists': _get_top_lists(all_items)
         }
         
@@ -344,6 +309,165 @@ def _overlay_file_sizes(items: List[Dict[str, Any]], movie_sizes: dict, show_siz
     return matched
 
 
+def _iso_to_epoch(value: Optional[str]) -> int:
+    """Convert a Radarr/Sonarr ISO 'added' timestamp to a unix epoch int."""
+    if not value:
+        return 0
+    try:
+        from datetime import datetime
+        return int(datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp())
+    except Exception:
+        return 0
+
+
+def _arr_rating(ratings: Optional[Dict[str, Any]], order) -> Optional[float]:
+    """Pull a 0-10 rating value out of a Radarr ratings block by source priority."""
+    ratings = ratings or {}
+    for src in order:
+        v = ratings.get(src)
+        if isinstance(v, dict) and v.get('value'):
+            return v.get('value')
+    return None
+
+
+def _load_watch_map(config: Dict[str, Any]) -> tuple:
+    """Build watch maps from Tautulli's history (the complete play log) rather than
+    the lazily-cached media_info table.
+
+    Returns (movie_watch, show_watch); each is {clean_title_key: {'last_played', 'play_count'}}.
+    Movies key on the play's title; shows key on the show (grandparent) title. A title
+    absent from the map has never been played.
+    """
+    movie_watch: dict = {}
+    show_watch: dict = {}
+    try:
+        tau = TautulliAPI(config['tautulli']['url'], config['tautulli']['api_key'])
+    except Exception as e:
+        logger.warning(f"Could not init Tautulli for history: {e}")
+        return movie_watch, show_watch
+
+    start = 0
+    page = 10000
+    safety_cap = 500000
+    while start < safety_cap:
+        try:
+            resp = tau._make_request('get_history', timeout=60, length=page, start=start,
+                                     order_column='date', order_dir='desc')
+        except Exception as e:
+            logger.warning(f"Tautulli get_history failed at start={start}: {e}")
+            break
+        rows = resp.get('data', []) if isinstance(resp, dict) else resp
+        total = (resp.get('recordsFiltered') or resp.get('recordsTotal') or 0) if isinstance(resp, dict) else len(rows)
+        if not rows:
+            break
+        for r in rows:
+            mt = r.get('media_type')
+            try:
+                date = int(r.get('date') or 0)
+            except (ValueError, TypeError):
+                date = 0
+            if mt == 'movie':
+                title = r.get('title') or r.get('full_title') or ''
+                target = movie_watch
+            elif mt == 'episode':
+                title = r.get('grandparent_title') or ''
+                target = show_watch
+            else:
+                continue
+            if not title:
+                continue
+            for k in _sonarr_radarr_title_keys(title):
+                if not k:
+                    continue
+                entry = target.get(k)
+                if entry is None:
+                    target[k] = {'last_played': date, 'play_count': 1}
+                else:
+                    if date > (entry['last_played'] or 0):
+                        entry['last_played'] = date
+                    entry['play_count'] += 1
+        start += len(rows)
+        if start >= total:
+            break
+    logger.info(f"Loaded Tautulli history: {len(movie_watch)} movie keys, {len(show_watch)} show keys")
+    return movie_watch, show_watch
+
+
+def _catalog_item(lib, arr_id, title, year, size, added_iso, genres, rating, audience, clean_title, watch_map):
+    """Assemble one catalog item (Radarr/Sonarr fields + joined Tautulli watch data)."""
+    watch = None
+    for k in _sonarr_radarr_title_keys(title or '', clean_title):
+        if k in watch_map:
+            watch = watch_map[k]
+            break
+    watch = watch or {}
+    return {
+        'library_type': lib,
+        'library_name': 'Movies' if lib == 'movie' else 'TV Shows',
+        'id': f"{lib}:{arr_id}",        # stable selection/removal handle
+        'arr_id': arr_id,
+        'title': title or '',
+        'year': year,
+        'file_size': size,
+        'added_at': _iso_to_epoch(added_iso),
+        'last_played': watch.get('last_played'),
+        'play_count': watch.get('play_count', 0),
+        'genres': genres or [],
+        'rating': rating,
+        'audience_rating': audience,
+    }
+
+
+def _build_catalog(config: Dict[str, Any]) -> tuple:
+    """Build the item universe straight from Radarr/Sonarr (the authoritative catalog),
+    joined with Tautulli watch history. Returns (items, library_size).
+
+    This replaces reading Tautulli's stale media_info table: the item list is always
+    complete/current, sizes are exact, and each item carries its Radarr/Sonarr id so
+    removal can target it precisely.
+    """
+    movie_watch, show_watch = _load_watch_map(config)
+    items: List[Dict[str, Any]] = []
+    library_size = 0
+
+    if config.get('radarr', {}).get('enabled') and config['media'].get('process_movies', True):
+        try:
+            radarr = RadarrAPI(config['radarr']['url'], config['radarr']['api_key'])
+            for mv in radarr.get_movies():
+                size = mv.get('sizeOnDisk') or 0
+                if not size:
+                    continue
+                library_size += size
+                items.append(_catalog_item(
+                    'movie', mv.get('id'), mv.get('title'), mv.get('year'), size,
+                    mv.get('added'), mv.get('genres'),
+                    _arr_rating(mv.get('ratings'), ('imdb', 'tmdb', 'trakt')),
+                    _arr_rating(mv.get('ratings'), ('tmdb', 'trakt', 'imdb')),
+                    mv.get('cleanTitle'), movie_watch))
+            logger.info(f"Radarr catalog: {sum(1 for i in items if i['library_type']=='movie')} movies with files")
+        except Exception as e:
+            logger.warning(f"Could not load Radarr catalog: {e}")
+
+    if config.get('sonarr', {}).get('enabled') and config['media'].get('process_tv_shows', True):
+        try:
+            sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
+            for sr in sonarr.get_series():
+                size = (sr.get('statistics') or {}).get('sizeOnDisk') or 0
+                if not size:
+                    continue
+                library_size += size
+                rv = (sr.get('ratings') or {}).get('value')
+                items.append(_catalog_item(
+                    'show', sr.get('id'), sr.get('title'), sr.get('year'), size,
+                    sr.get('added'), sr.get('genres'), rv, rv,
+                    sr.get('cleanTitle'), show_watch))
+            logger.info(f"Sonarr catalog: {sum(1 for i in items if i['library_type']=='show')} series with files")
+        except Exception as e:
+            logger.warning(f"Could not load Sonarr catalog: {e}")
+
+    return items, library_size
+
+
 @app.get("/api/candidates")
 async def get_removal_candidates():
     """Get list of items that would be removed with current config."""
@@ -351,72 +475,29 @@ async def get_removal_candidates():
         config = load_config()
         analyzer = LibraryAnalyzer(config)
 
-        # Load exact Radarr/Sonarr on-disk sizes once. The size-map key set
-        # doubles as the clean-title lookup used to cross-reference Tautulli
-        # candidates so stale items (removed from Plex/Radarr/Sonarr but still
-        # in Tautulli history) are excluded before the user ever sees them.
-        movie_sizes, show_sizes = _load_arr_sizes(config)
-        radarr_clean_titles: set = set(movie_sizes['by_key'].keys())
-        sonarr_clean_titles: set = set(show_sizes['by_key'].keys())
-
-        libraries = analyzer.tautulli.get_libraries()
+        # Build the catalog from Radarr/Sonarr (+ Tautulli watch history), then keep
+        # only items old/unwatched enough to remove. Each carries its own *arr id.
+        all_items, _ = _build_catalog(config)
         candidates = []
-        stale_count = 0
-
-        for library in libraries:
-            library_type = library.get('section_type', 'Unknown')
-            library_id = library.get('section_id')
-            library_name = library.get('section_name', 'Unknown')
-
-            if library_type == 'movie' and not config['media'].get('process_movies', True):
-                continue
-            if library_type == 'show' and not config['media'].get('process_tv_shows', True):
-                continue
-
-            media_response = analyzer.tautulli.get_library_media_info(library_id, length=10000)
-            media_items = media_response.get('data', []) if isinstance(media_response, dict) else media_response
-
-            for item in media_items:
-                if not analyzer.filter.is_old_enough(
-                    item.get('last_played'),
-                    item.get('added_at'),
-                    item.get('play_count'),
-                    item_data=item
-                ):
-                    continue
-
-                # Cross-reference: skip items no longer present in Radarr/Sonarr.
-                # Try both with-year and without-year variants of the Tautulli title — Tautulli
-                # sometimes appends a disambiguation year that Sonarr may or may not include.
-                title = item.get('title', '')
-                tautulli_keys = _sonarr_radarr_title_keys(title)  # no authoritative cleanTitle here
-                if library_type == 'movie' and radarr_clean_titles and not tautulli_keys & radarr_clean_titles:
-                    logger.debug(f"Cross-ref filtered movie: {title!r} -> keys={tautulli_keys!r}")
-                    stale_count += 1
-                    continue
-                if library_type == 'show' and sonarr_clean_titles and not tautulli_keys & sonarr_clean_titles:
-                    logger.debug(f"Cross-ref filtered show: {title!r} -> keys={tautulli_keys!r}")
-                    stale_count += 1
-                    continue
-
+        for item in all_items:
+            if analyzer.filter.is_old_enough(
+                item.get('last_played'),
+                item.get('added_at'),
+                item.get('play_count'),
+                item_data=item
+            ):
                 candidates.append({
-                    'library_type': library_type,
-                    'library_name': library_name,
-                    'title': title,
+                    'library_type': item['library_type'],
+                    'library_name': item['library_name'],
+                    'id': item['id'],
+                    'arr_id': item['arr_id'],
+                    'title': item['title'],
                     'year': item.get('year'),
                     'last_played': item.get('last_played'),
                     'added_at': item.get('added_at'),
                     'play_count': item.get('play_count', 0),
-                    'rating_key': item.get('rating_key'),
                     'file_size': item.get('file_size', 0),
-                    'total_duration': item.get('total_duration', 0)
                 })
-
-        # Replace Tautulli's (possibly-blank) sizes with exact Radarr/Sonarr sizes.
-        _overlay_file_sizes(candidates, movie_sizes, show_sizes)
-
-        if stale_count:
-            logger.info(f"Cross-reference filtered {stale_count} stale Tautulli item(s) not found in Radarr/Sonarr")
 
         return {"success": True, "data": candidates}
 
@@ -427,52 +508,50 @@ async def get_removal_candidates():
 
 @app.post("/api/remove")
 async def remove_media(request: RemovalRequest):
-    """Execute media removal."""
+    """Execute media removal (by Radarr/Sonarr id, with legacy rating_key support)."""
     try:
         config = load_config()
-        
+
         if not request.confirm:
             raise HTTPException(status_code=400, detail="Confirmation required")
-        
-        # SAFETY: Require explicit rating_keys - never allow unintentional mass removal
-        if not request.rating_keys or len(request.rating_keys) == 0:
-            raise HTTPException(
-                status_code=400, 
-                detail="No items specified for removal. Please select specific items to remove."
-            )
-        
-        # SAFETY: Enforce maximum items per operation
-        max_allowed = config['safety'].get('max_items_per_run', 200)
-        if len(request.rating_keys) > max_allowed:
+
+        # Prefer explicit *arr ids; fall back to legacy Tautulli rating_keys.
+        targets = request.ids or request.rating_keys or []
+        use_ids = bool(request.ids)
+
+        # SAFETY: never allow an unintentional mass removal - require explicit items.
+        if not targets:
             raise HTTPException(
                 status_code=400,
-                detail=f"Cannot remove {len(request.rating_keys)} items at once. Maximum allowed: {max_allowed}"
+                detail="No items specified for removal. Please select specific items to remove."
             )
-        
-        logger.info(f"Remove request for {len(request.rating_keys)} specific items")
-        
-        # Don't override dry_run - respect the config file setting
-        # Only disable confirmation prompts since user already confirmed via UI
+
+        # SAFETY: enforce the maximum items per operation.
+        max_allowed = config['safety'].get('max_items_per_run', 200)
+        if len(targets) > max_allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot remove {len(targets)} items at once. Maximum allowed: {max_allowed}"
+            )
+
+        logger.info(f"Remove request for {len(targets)} items ({'ids' if use_ids else 'rating_keys'})")
+
+        # Respect the configured dry_run; only skip the interactive CLI prompt.
         config['safety']['require_confirmation'] = False
-        
+
         remover = MediaRemover(config)
-        success = remover.remove_by_rating_keys(request.rating_keys)
-        
-        # Trigger Tautulli to refresh library data from Plex
-        # This picks up removed shows without recalculating file sizes
-        # (file size calculation is a separate opt-in background job)
-        if success:
-            try:
-                remover.tautulli.refresh_libraries()
-                logger.info("Tautulli libraries refreshed to pick up removed media")
-            except Exception as e:
-                logger.warning(f"Failed to refresh Tautulli libraries: {e}")
-        
+        if use_ids:
+            success = remover.remove_by_ids(request.ids)
+        else:
+            success = remover.remove_by_rating_keys(request.rating_keys)
+
         return {
             "success": success,
             "message": "Removal process completed" if success else "Removal process failed"
         }
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error during removal: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
