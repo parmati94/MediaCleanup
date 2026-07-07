@@ -1,180 +1,135 @@
 <div class="space-y-6">
-    <!-- Quick Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div class="stat-card">
-            <div class="text-sm opacity-90 mb-2">Total Items</div>
-            <div class="text-4xl font-bold" x-text="analysis?.total_items || 0"></div>
-        </div>
-        <div class="stat-card">
-            <div class="text-sm opacity-90 mb-2">Would Be Removed</div>
-            <div class="text-4xl font-bold" x-text="analysis?.current_config_impact?.would_remove || 0"></div>
-        </div>
-        <div class="stat-card">
-            <div class="text-sm opacity-90 mb-2">Protected Items</div>
-            <div class="text-4xl font-bold" x-text="(analysis?.current_config_impact?.filtered_by_age || 0) + (analysis?.current_config_impact?.filtered_by_protection || 0)"></div>
-        </div>
-    </div>
 
-    <!-- Quick Actions -->
-    <div class="card">
-        <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <button @click="runAnalysis(false)" :disabled="loading" class="btn-primary">
-                <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+    <!-- Empty state -->
+    <template x-if="!analysis">
+        <div class="card text-center py-16">
+            <div class="mx-auto w-12 h-12 rounded-xl bg-primary-600/10 text-primary-600 dark:text-primary-400 flex items-center justify-center mb-4">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
                 </svg>
-                Run Analysis
-            </button>
-            <button @click="settingsOpen = true" class="btn-secondary">
-                <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                </svg>
-                Open Settings
-            </button>
-            <button @click="currentTab = 'removal'" class="btn-secondary">
-                <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                </svg>
-                Execute Removal
-            </button>
+            </div>
+            <p class="text-gray-600 dark:text-gray-400 mb-4">Run an analysis to see how much space you can reclaim.</p>
+            <button @click="runAnalysis(false)" :disabled="loading" class="btn-primary">Run Analysis</button>
         </div>
-    </div>
+    </template>
 
-    <!-- Service Status -->
-    <div class="card">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Service Status</h2>
-            <button @click="testAllConnections()" :disabled="loading" class="btn-secondary text-sm">
-                <svg class="inline-block w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                </svg>
-                Test All
-            </button>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div class="flex items-center space-x-3 p-4 rounded-lg border transition-colors"
-                 :class="connectionStatus.tautulli === null ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800' : connectionStatus.tautulli.success ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'">
-                <div class="w-3 h-3 rounded-full flex-shrink-0"
-                     :class="connectionStatus.tautulli === null ? 'bg-gray-400' : connectionStatus.tautulli.success ? 'bg-green-500' : 'bg-red-500'"></div>
-                <div class="min-w-0">
-                    <div class="font-semibold text-gray-800 dark:text-gray-200">Tautulli</div>
-                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate" x-text="connectionStatus.tautulli?.message || 'Not tested'"></div>
-                </div>
-            </div>
-            <div class="flex items-center space-x-3 p-4 rounded-lg border transition-colors"
-                 :class="connectionStatus.sonarr === null ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800' : connectionStatus.sonarr.success ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'">
-                <div class="w-3 h-3 rounded-full flex-shrink-0"
-                     :class="connectionStatus.sonarr === null ? 'bg-gray-400' : connectionStatus.sonarr.success ? 'bg-green-500' : 'bg-red-500'"></div>
-                <div class="min-w-0">
-                    <div class="font-semibold text-gray-800 dark:text-gray-200">Sonarr</div>
-                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate" x-text="connectionStatus.sonarr?.message || 'Not tested'"></div>
-                </div>
-            </div>
-            <div class="flex items-center space-x-3 p-4 rounded-lg border transition-colors"
-                 :class="connectionStatus.radarr === null ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800' : connectionStatus.radarr.success ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'">
-                <div class="w-3 h-3 rounded-full flex-shrink-0"
-                     :class="connectionStatus.radarr === null ? 'bg-gray-400' : connectionStatus.radarr.success ? 'bg-green-500' : 'bg-red-500'"></div>
-                <div class="min-w-0">
-                    <div class="font-semibold text-gray-800 dark:text-gray-200">Radarr</div>
-                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate" x-text="connectionStatus.radarr?.message || 'Not tested'"></div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <template x-if="analysis">
+        <div class="space-y-6">
 
-    <!-- Watch Status Overview -->
-    <div class="card" x-show="analysis">
-        <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-4">Watch Status Overview</h2>
-        <div x-show="analysis?.watch_status?.shows">
-            <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3">TV Shows</h3>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                    <div class="text-2xl font-bold text-gray-900 dark:text-white" x-text="analysis?.watch_status?.shows?.never_watched || 0"></div>
-                    <div class="text-sm text-gray-600 dark:text-gray-400">Never Watched</div>
-                </div>
-                <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                    <div class="text-2xl font-bold text-gray-900 dark:text-white" x-text="analysis?.watch_status?.shows?.lightly_watched || 0"></div>
-                    <div class="text-sm text-gray-600 dark:text-gray-400">Lightly Watched</div>
-                </div>
-                <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                    <div class="text-2xl font-bold text-gray-900 dark:text-white" x-text="analysis?.watch_status?.shows?.moderately_watched || 0"></div>
-                    <div class="text-sm text-gray-600 dark:text-gray-400">Moderately Watched</div>
-                </div>
-                <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                    <div class="text-2xl font-bold text-gray-900 dark:text-white" x-text="analysis?.watch_status?.shows?.heavily_watched || 0"></div>
-                    <div class="text-sm text-gray-600 dark:text-gray-400">Heavily Watched</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Current Config Impact -->
-    <div class="card" x-show="analysis && config">
-        <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">Current Configuration Impact</h2>
-        
-        <!-- Active Filters Summary -->
-        <div class="mb-6">
-            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 uppercase tracking-wide">Active Filters</h3>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div class="flex items-center space-x-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                    <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
+            <!-- HERO: Library capacity / reclaim meter -->
+            <div class="card">
+                <div class="flex flex-wrap items-start justify-between gap-4">
                     <div>
-                        <div class="text-xs text-gray-500 dark:text-gray-400">Days Unwatched</div>
-                        <div class="text-lg font-bold text-gray-900 dark:text-white" x-text="config?.media?.days_unwatched || 0"></div>
+                        <div class="eyebrow">Reclaimable space</div>
+                        <div class="num text-5xl font-bold text-primary-600 dark:text-primary-400 mt-1 leading-none"
+                             x-text="formatFileSize(analysis.current_config_impact?.potential_savings || 0)"></div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                            <span class="num font-medium text-gray-700 dark:text-gray-300" x-text="analysis.current_config_impact?.would_remove || 0"></span> titles ·
+                            <span class="num" x-text="reclaimPct().toFixed(1)"></span>% of your
+                            <span class="num" x-text="formatFileSize(analysis.current_config_impact?.total_library_size || 0)"></span> library
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end gap-3">
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+                              :class="config?.safety?.dry_run ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'">
+                            <span class="w-1.5 h-1.5 rounded-full" :class="config?.safety?.dry_run ? 'bg-amber-500' : 'bg-rose-500'"></span>
+                            <span x-text="config?.safety?.dry_run ? 'Dry run' : 'LIVE'"></span>
+                        </span>
+                        <div class="flex gap-2">
+                            <button @click="runAnalysis(false)" :disabled="loading" class="btn-secondary text-sm py-1.5 px-3">Run analysis</button>
+                            <button @click="currentTab = 'removal'" class="btn-primary text-sm py-1.5 px-4">Review candidates &rarr;</button>
+                        </div>
                     </div>
                 </div>
-                <div class="flex items-center space-x-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                    <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                    </svg>
-                    <div>
-                        <div class="text-xs text-gray-500 dark:text-gray-400">Min Days Added</div>
-                        <div class="text-lg font-bold text-gray-900 dark:text-white" x-text="config?.media?.min_days_since_added || 0"></div>
+
+                <!-- Capacity meter -->
+                <div class="mt-6">
+                    <div class="h-3 w-full rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
+                        <div class="h-full rounded-full bg-primary-500 transition-all duration-700 ease-out"
+                             :style="`width:${reclaimPct()}%`"></div>
+                    </div>
+                    <div class="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-primary-500"></span> Reclaimable</span>
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-700"></span> In use</span>
                     </div>
                 </div>
-                <div class="flex items-center space-x-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                    <svg class="w-5 h-5 text-gray-500 dark:text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <div>
-                        <div class="text-xs text-gray-500 dark:text-gray-400">Zero Plays Only</div>
-                        <div class="text-lg font-bold text-gray-900 dark:text-white" x-text="config?.media?.require_zero_play_count ? 'Yes' : 'No'"></div>
+            </div>
+
+            <!-- Three focused tiles -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div class="stat-tile">
+                    <div class="eyebrow">Candidates</div>
+                    <div class="num text-3xl font-bold text-gray-900 dark:text-white mt-1"
+                         x-text="analysis.current_config_impact?.would_remove || 0"></div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        <span class="num" x-text="analysis.current_config_impact?.movies_to_remove || 0"></span> movies ·
+                        <span class="num" x-text="analysis.current_config_impact?.shows_to_remove || 0"></span> shows
+                    </div>
+                </div>
+
+                <div class="stat-tile">
+                    <div class="eyebrow">Reclaimable</div>
+                    <div class="num text-3xl font-bold text-primary-600 dark:text-primary-400 mt-1"
+                         x-text="formatFileSize(analysis.current_config_impact?.potential_savings || 0)"></div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        of <span class="num" x-text="formatFileSize(analysis.current_config_impact?.total_library_size || 0)"></span>
+                    </div>
+                </div>
+
+                <div class="stat-tile">
+                    <div class="eyebrow">Biggest single win</div>
+                    <template x-if="analysis.current_config_impact?.largest_candidate">
+                        <div>
+                            <div class="num text-3xl font-bold text-gray-900 dark:text-white mt-1"
+                                 x-text="formatFileSize(analysis.current_config_impact.largest_candidate.file_size)"></div>
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate"
+                                 x-text="analysis.current_config_impact.largest_candidate.title"></div>
+                        </div>
+                    </template>
+                    <template x-if="!analysis.current_config_impact?.largest_candidate">
+                        <div class="num text-3xl font-bold text-gray-400 mt-1">&mdash;</div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Slim strip: watch mix + services -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+                <!-- Watch mix (TV) -->
+                <div class="stat-tile" x-show="analysis.watch_status?.shows">
+                    <div class="eyebrow mb-3">Watch mix &middot; TV</div>
+                    <div class="flex h-3 w-full rounded-full overflow-hidden bg-gray-200 dark:bg-gray-800">
+                        <div class="h-full bg-primary-500" :style="`width:${watchPct('shows','never_watched')}%`"></div>
+                        <div class="h-full bg-gray-400 dark:bg-gray-500" :style="`width:${watchPct('shows','lightly_watched')}%`"></div>
+                        <div class="h-full bg-gray-500 dark:bg-gray-600" :style="`width:${watchPct('shows','moderately_watched')}%`"></div>
+                        <div class="h-full bg-gray-600 dark:bg-gray-700" :style="`width:${watchPct('shows','heavily_watched')}%`"></div>
+                    </div>
+                    <div class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-gray-600 dark:text-gray-400">
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-primary-500"></span> Never <span class="num ml-auto text-gray-500" x-text="analysis.watch_status?.shows?.never_watched || 0"></span></span>
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500"></span> Lightly <span class="num ml-auto text-gray-500" x-text="analysis.watch_status?.shows?.lightly_watched || 0"></span></span>
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gray-500 dark:bg-gray-600"></span> Moderately <span class="num ml-auto text-gray-500" x-text="analysis.watch_status?.shows?.moderately_watched || 0"></span></span>
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gray-600 dark:bg-gray-700"></span> Heavily <span class="num ml-auto text-gray-500" x-text="analysis.watch_status?.shows?.heavily_watched || 0"></span></span>
+                    </div>
+                </div>
+
+                <!-- Services -->
+                <div class="stat-tile">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="eyebrow">Services</div>
+                        <button @click="testAllConnections()" :disabled="loading" class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">Test</button>
+                    </div>
+                    <div class="space-y-2.5">
+                        <template x-for="svc in ['tautulli','sonarr','radarr']" :key="svc">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                      :class="connectionStatus[svc] === null ? 'bg-gray-300 dark:bg-gray-600' : (connectionStatus[svc]?.success ? 'bg-emerald-500' : 'bg-rose-500')"></span>
+                                <span class="font-medium text-gray-800 dark:text-gray-200 capitalize" x-text="svc"></span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400 truncate ml-auto" x-text="connectionStatus[svc]?.message || 'Not tested'"></span>
+                            </div>
+                        </template>
                     </div>
                 </div>
             </div>
         </div>
-        
-        <!-- Impact Metrics -->
-        <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 uppercase tracking-wide">Impact</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                <div class="text-3xl font-bold text-red-600 dark:text-red-400" x-text="analysis?.current_config_impact?.would_remove || 0"></div>
-                <div class="text-sm text-gray-600 dark:text-gray-400">Items to Remove</div>
-                <div class="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                    <span x-text="analysis?.current_config_impact?.movies_to_remove || 0"></span> movies,
-                    <span x-text="analysis?.current_config_impact?.shows_to_remove || 0"></span> shows
-                </div>
-            </div>
-            <div class="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
-                <div class="text-3xl font-bold text-purple-600 dark:text-purple-400" x-text="formatFileSize(analysis?.current_config_impact?.potential_savings || 0)"></div>
-                <div class="text-sm text-gray-600 dark:text-gray-400">Potential Space Savings</div>
-                <div class="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                    <span x-text="((analysis?.current_config_impact?.potential_savings / analysis?.current_config_impact?.total_library_size * 100) || 0).toFixed(1)"></span>% of library
-                </div>
-            </div>
-            <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                <div class="text-3xl font-bold text-yellow-600 dark:text-yellow-400" x-text="analysis?.current_config_impact?.filtered_by_age || 0"></div>
-                <div class="text-sm text-gray-600 dark:text-gray-400">Filtered by Age</div>
-                <div class="text-xs text-gray-500 dark:text-gray-500 mt-1">Too recent to remove</div>
-            </div>
-            <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-                <div class="text-3xl font-bold text-green-600 dark:text-green-400" x-text="analysis?.current_config_impact?.filtered_by_protection || 0"></div>
-                <div class="text-sm text-gray-600 dark:text-gray-400">Protected</div>
-                <div class="text-xs text-gray-500 dark:text-gray-500 mt-1">By keywords/rules</div>
-            </div>
-        </div>
-    </div>
+    </template>
 </div>

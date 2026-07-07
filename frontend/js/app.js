@@ -3,6 +3,13 @@
  * Imports Alpine.js and initializes the app
  */
 import Alpine from 'alpinejs';
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
+import '@fontsource/ibm-plex-sans/600.css';
+import '@fontsource/ibm-plex-sans/700.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import '@fontsource/ibm-plex-mono/600.css';
 import '../css/style.css';
 
 // Expose Alpine globally BEFORE any DOM parsing
@@ -16,6 +23,7 @@ function appData() {
         loading: false,
         refreshing: false,
         settingsOpen: false,
+        settingsTab: 'connections',
         config: null,
         analysis: null,
         candidates: null,
@@ -146,7 +154,9 @@ function appData() {
         },
 
         async saveSettings() {
-            await this.saveConfig();
+            this.updateProtectedKeywords();
+            await this.saveConfig();               // persists + re-runs analysis (dashboard)
+            if (this.candidates) await this.loadCandidates();  // keep the removal list in sync
             this.settingsOpen = false;
         },
 
@@ -385,6 +395,21 @@ function appData() {
         getTotalUnwatched() {
             if (!this.analysis?.age_distribution) return 1;
             return Object.values(this.analysis.age_distribution).reduce((a, b) => a + b, 0) || 1;
+        },
+
+        // Share of a watch bucket ('shows'|'movies') for the dashboard mix bar.
+        watchPct(kind, bucket) {
+            const w = this.analysis?.watch_status?.[kind];
+            if (!w) return 0;
+            const tot = (w.never_watched || 0) + (w.lightly_watched || 0) + (w.moderately_watched || 0) + (w.heavily_watched || 0);
+            return tot ? ((w[bucket] || 0) / tot * 100) : 0;
+        },
+
+        // Reclaimable space as a % of the managed library (for the capacity meter).
+        reclaimPct() {
+            const i = this.analysis?.current_config_impact;
+            if (!i || !i.total_library_size) return 0;
+            return Math.min(100, (i.potential_savings || 0) / i.total_library_size * 100);
         },
 
         showSuccess(message) {

@@ -34,88 +34,15 @@
             </div>
         </div>
 
-        <!-- Removal Filters -->
+        <!-- Active filters summary (edit them in Settings -> Removal Filters) -->
         <template x-if="config">
-            <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-5 mb-6 space-y-5">
-                <div class="flex items-center justify-between">
-                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">Removal Filters</h3>
-                    <button @click="applyFilters()" :disabled="loading" class="btn-primary text-sm py-1.5 px-4">Apply Filters</button>
-                </div>
-
-                <!-- Media type -->
-                <div>
-                    <label class="label">Media Type</label>
-                    <div class="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
-                        <template x-for="opt in [{k:'both',l:'Both'},{k:'movies',l:'Movies'},{k:'tv',l:'TV'}]" :key="opt.k">
-                            <button type="button" @click="setMediaType(opt.k)"
-                                    :class="mediaType === opt.k ? 'bg-primary-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'"
-                                    class="px-4 py-2 text-sm font-medium transition border-r last:border-r-0 border-gray-300 dark:border-gray-600"
-                                    x-text="opt.l"></button>
-                        </template>
-                    </div>
-                </div>
-
-                <!-- Primary criteria -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                        <label class="label">Days Unwatched</label>
-                        <input type="number" x-model.number="config.media.days_unwatched" class="input-field">
-                        <p class="text-xs text-gray-500 mt-1">Days since last watched.</p>
-                    </div>
-                    <div>
-                        <label class="label">Min Days Since Added</label>
-                        <input type="number" x-model.number="config.media.min_days_since_added" class="input-field">
-                        <p class="text-xs text-gray-500 mt-1">Minimum age in the library.</p>
-                    </div>
-                </div>
-                <label class="flex items-center">
-                    <input type="checkbox" x-model="config.media.require_zero_play_count" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
-                    <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Only ever remove items that have never been watched</span>
-                </label>
-
-                <!-- Advanced protections -->
-                <div x-data="{ advOpen: false }" class="border-t border-gray-200 dark:border-gray-700 pt-3">
-                    <button type="button" @click="advOpen = !advOpen" class="flex items-center gap-2 text-sm font-medium text-primary-600 dark:text-primary-400">
-                        <svg class="w-4 h-4 transition-transform duration-200" :class="advOpen ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                        Advanced protections
-                    </button>
-                    <div x-show="advOpen" x-transition class="mt-4 space-y-4">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                                <label class="label">Min Rating to Keep (0-10)</label>
-                                <input type="number" step="0.1" min="0" max="10" x-model.number="config.media.filters.min_rating_to_keep" class="input-field">
-                                <p class="text-xs text-gray-500 mt-1">Keep items rated above this (0 = off).</p>
-                            </div>
-                            <div>
-                                <label class="label">Min Audience Rating to Keep (0-10)</label>
-                                <input type="number" step="0.1" min="0" max="10" x-model.number="config.media.filters.min_audience_rating_to_keep" class="input-field">
-                                <p class="text-xs text-gray-500 mt-1">0 = off.</p>
-                            </div>
-                            <div>
-                                <label class="label">Protect Classics Before Year</label>
-                                <input type="number" x-model.number="config.media.filters.protect_classics_before_year" class="input-field">
-                                <p class="text-xs text-gray-500 mt-1">Keep movies this year or older (0 = off).</p>
-                            </div>
-                            <div>
-                                <label class="label">Protect Recent After Year</label>
-                                <input type="number" x-model.number="config.media.filters.protect_recent_after_year" class="input-field">
-                                <p class="text-xs text-gray-500 mt-1">Keep movies newer than this (0 = off).</p>
-                            </div>
-                            <div>
-                                <label class="label">Min File Size to Keep (GB)</label>
-                                <input type="number" step="0.1" min="0" x-model.number="minSizeGB" class="input-field">
-                                <p class="text-xs text-gray-500 mt-1">Keep files larger than this (0 = off).</p>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="label">Protected Keywords (one per line)</label>
-                            <textarea x-model="protectedKeywordsText" @input="updateProtectedKeywords" rows="4" class="input-field font-mono text-sm" placeholder="Star Wars&#10;Lord of the Rings"></textarea>
-                            <p class="text-xs text-gray-500 mt-1">Titles containing these are never removed.</p>
-                        </div>
-                    </div>
-                </div>
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-6">
+                <span class="eyebrow">Filters</span>
+                <span class="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-xs font-medium text-gray-700 dark:text-gray-300"
+                      x-text="mediaType === 'both' ? 'Movies + TV' : (mediaType === 'movies' ? 'Movies' : 'TV')"></span>
+                <span class="text-sm text-gray-500 dark:text-gray-400">not played in <span class="num" x-text="config.media.days_unwatched"></span>d</span>
+                <span x-show="config.media.require_zero_play_count" class="text-sm text-gray-500 dark:text-gray-400">&middot; never-watched only</span>
+                <button @click="settingsTab = 'filters'; settingsOpen = true" class="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline ml-auto">Edit filters &rarr;</button>
             </div>
         </template>
 

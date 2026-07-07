@@ -205,13 +205,17 @@ async def analyze_library(request: AnalysisRequest):
         # media-info sizes blank out on refresh; *arr sizes never go stale).
         movie_sizes, show_sizes = _load_arr_sizes(config)
         _overlay_file_sizes(all_items, movie_sizes, show_sizes)
+        # Same cross-reference keys the candidates endpoint uses, so the
+        # dashboard impact numbers match the Removal page.
+        radarr_keys = set(movie_sizes['by_key'].keys())
+        sonarr_keys = set(show_sizes['by_key'].keys())
 
         # Calculate statistics
         result = {
             'total_items': len(all_items),
             'watch_status': _calculate_watch_status(all_items),
             'age_distribution': _calculate_age_distribution(all_items),
-            'current_config_impact': _calculate_config_impact(all_items, analyzer),
+            'current_config_impact': _calculate_config_impact(all_items, analyzer, radarr_keys, sonarr_keys),
             'top_lists': _get_top_lists(all_items)
         }
         
@@ -602,23 +606,39 @@ def _calculate_age_distribution(items: List[Dict[str, Any]]) -> Dict[str, int]:
     return buckets
 
 
-def _calculate_config_impact(items: List[Dict[str, Any]], analyzer: LibraryAnalyzer) -> Dict[str, Any]:
-    """Calculate impact of current configuration."""
+def _calculate_config_impact(items: List[Dict[str, Any]], analyzer: LibraryAnalyzer,
+                             radarr_keys: set = None, sonarr_keys: set = None) -> Dict[str, Any]:
+    """Calculate impact of current configuration.
+
+    When Radarr/Sonarr title-key sets are provided, items no longer present in
+    Radarr/Sonarr (stale Tautulli entries) are excluded - mirroring the removal
+    candidates endpoint so the dashboard numbers match the Removal page.
+    """
     candidates = []
     filtered_by_age = 0
     filtered_by_protection = 0
     total_library_size = 0
     potential_savings = 0
-    
+
     for item in items:
-        # Track total library size
+        library_type = item.get('library_type')
+        title = item.get('title', '') or ''
+
+        # Skip stale items not present in Radarr/Sonarr (same cross-reference as
+        # /api/candidates). Only applies when the relevant key set is populated.
+        if library_type == 'movie' and radarr_keys and not (_sonarr_radarr_title_keys(title) & radarr_keys):
+            continue
+        if library_type == 'show' and sonarr_keys and not (_sonarr_radarr_title_keys(title) & sonarr_keys):
+            continue
+
+        # Track total (real, non-stale) library size
         file_size = item.get('file_size')
         if file_size and file_size != 'N/A':
             try:
                 total_library_size += int(file_size)
             except (ValueError, TypeError):
                 pass
-        
+
         if analyzer.filter.is_old_enough(
             item.get('last_played'),
             item.get('added_at'),
@@ -644,7 +664,24 @@ def _calculate_config_impact(items: List[Dict[str, Any]], analyzer: LibraryAnaly
     
     movies_to_remove = sum(1 for i in candidates if i.get('library_type') == 'movie')
     shows_to_remove = sum(1 for i in candidates if i.get('library_type') == 'show')
-    
+
+    # Largest actual removal candidate (the single biggest space win).
+    def _size(i):
+        try:
+            return int(i.get('file_size') or 0)
+        except (ValueError, TypeError):
+            return 0
+
+    largest_candidate = None
+    if candidates:
+        top = max(candidates, key=_size)
+        largest_candidate = {
+            'title': top.get('title', 'Unknown'),
+            'year': top.get('year'),
+            'library_type': top.get('library_type'),
+            'file_size': _size(top),
+        }
+
     return {
         'would_remove': len(candidates),
         'movies_to_remove': movies_to_remove,
@@ -653,7 +690,8 @@ def _calculate_config_impact(items: List[Dict[str, Any]], analyzer: LibraryAnaly
         'filtered_by_protection': filtered_by_protection,
         'total': len(items),
         'total_library_size': total_library_size,
-        'potential_savings': potential_savings
+        'potential_savings': potential_savings,
+        'largest_candidate': largest_candidate
     }
 
 
