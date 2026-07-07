@@ -209,13 +209,21 @@ async def analyze_library(request: AnalysisRequest):
         # dashboard impact numbers match the Removal page.
         radarr_keys = set(movie_sizes['by_key'].keys())
         sonarr_keys = set(show_sizes['by_key'].keys())
+        # True managed-library size straight from Radarr/Sonarr (authoritative on-disk
+        # totals), respecting which library types are enabled. Tautulli's cached
+        # media-info table can lag behind new media, so we don't total from it.
+        library_size = 0
+        if config['media'].get('process_movies', True):
+            library_size += movie_sizes.get('total', 0)
+        if config['media'].get('process_tv_shows', True):
+            library_size += show_sizes.get('total', 0)
 
         # Calculate statistics
         result = {
             'total_items': len(all_items),
             'watch_status': _calculate_watch_status(all_items),
             'age_distribution': _calculate_age_distribution(all_items),
-            'current_config_impact': _calculate_config_impact(all_items, analyzer, radarr_keys, sonarr_keys),
+            'current_config_impact': _calculate_config_impact(all_items, analyzer, radarr_keys, sonarr_keys, library_size),
             'top_lists': _get_top_lists(all_items)
         }
         
@@ -271,6 +279,7 @@ def _load_arr_sizes(config: Dict[str, Any]) -> tuple:
     def build(items: List[Dict[str, Any]]) -> Dict[str, dict]:
         by_ty: dict = {}
         by_key: dict = {}
+        total = 0
         for it in items:
             title = it.get('title', '') or ''
             # Radarr movies expose sizeOnDisk at top level; Sonarr series nest it
@@ -280,15 +289,16 @@ def _load_arr_sizes(config: Dict[str, Any]) -> tuple:
                 size = (it.get('statistics') or {}).get('sizeOnDisk')
             if not size:
                 continue
+            total += size
             ct = _make_clean_title(title, strip_year=True)
             if ct:
                 by_ty[(ct, str(it.get('year')))] = size
             for k in _sonarr_radarr_title_keys(title, it.get('cleanTitle')):
                 if k:
                     by_key.setdefault(k, size)
-        return {'by_title_year': by_ty, 'by_key': by_key}
+        return {'by_title_year': by_ty, 'by_key': by_key, 'total': total}
 
-    empty = {'by_title_year': {}, 'by_key': {}}
+    empty = {'by_title_year': {}, 'by_key': {}, 'total': 0}
     movie_sizes, show_sizes = dict(empty), dict(empty)
 
     if config.get('radarr', {}).get('enabled'):
@@ -607,7 +617,8 @@ def _calculate_age_distribution(items: List[Dict[str, Any]]) -> Dict[str, int]:
 
 
 def _calculate_config_impact(items: List[Dict[str, Any]], analyzer: LibraryAnalyzer,
-                             radarr_keys: set = None, sonarr_keys: set = None) -> Dict[str, Any]:
+                             radarr_keys: set = None, sonarr_keys: set = None,
+                             library_size: int = None) -> Dict[str, Any]:
     """Calculate impact of current configuration.
 
     When Radarr/Sonarr title-key sets are provided, items no longer present in
@@ -689,7 +700,7 @@ def _calculate_config_impact(items: List[Dict[str, Any]], analyzer: LibraryAnaly
         'filtered_by_age': filtered_by_age,
         'filtered_by_protection': filtered_by_protection,
         'total': len(items),
-        'total_library_size': total_library_size,
+        'total_library_size': library_size if library_size is not None else total_library_size,
         'potential_savings': potential_savings,
         'largest_candidate': largest_candidate
     }
