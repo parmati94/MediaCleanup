@@ -1,8 +1,10 @@
 """
 Media Cleanup UI - FastAPI Backend
 """
+import copy
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -59,14 +61,15 @@ def get_default_config() -> Dict[str, Any]:
             'process_tv_shows': True,
             'days_unwatched': 365,
             'min_days_since_added': 400,
-            'require_zero_play_count': True,
+            'max_play_count': 1,
             'filters': {
                 'min_rating_to_keep': 0,
                 'min_audience_rating_to_keep': 0,
                 'protect_classics_before_year': 1995,
                 'protect_recent_after_year': 0,
                 'min_file_size_to_keep': 0,
-                'protected_keywords': []
+                'protected_keywords': [],
+                'protected_genres': []
             }
         },
         'radarr': {
@@ -140,6 +143,12 @@ class RemovalRequest(BaseModel):
     confirm: bool = False
     ids: Optional[List[str]] = None          # "movie:123" / "show:45" (preferred)
     rating_keys: Optional[List[str]] = None  # legacy Tautulli rating keys
+
+
+class PreviewRequest(BaseModel):
+    """Model for live filter-impact preview. `media` is the (possibly unsaved)
+    media config block from the settings modal."""
+    media: Dict[str, Any] = {}
 
 
 # API Endpoints
@@ -466,6 +475,120 @@ def _build_catalog(config: Dict[str, Any]) -> tuple:
             logger.warning(f"Could not load Sonarr catalog: {e}")
 
     return items, library_size
+
+
+# In-memory cache of the FULL catalog (both media types, ignoring process flags)
+# so the live filter preview can re-filter in memory without rebuilding on every
+# keystroke. Keyed on the connection signature; short TTL keeps it fresh.
+_CATALOG_CACHE: Dict[str, Any] = {"sig": None, "ts": 0.0, "items": None, "library_size": 0}
+_CATALOG_TTL_SECONDS = 120
+
+
+def _connection_signature(config: Dict[str, Any]) -> tuple:
+    """Identity of the data sources; the cached catalog is invalid if any change."""
+    r = config.get('radarr', {}) or {}
+    s = config.get('sonarr', {}) or {}
+    t = config.get('tautulli', {}) or {}
+    return (
+        r.get('enabled'), r.get('url'), r.get('api_key'),
+        s.get('enabled'), s.get('url'), s.get('api_key'),
+        t.get('url'), t.get('api_key'),
+    )
+
+
+def _get_full_catalog(config: Dict[str, Any]) -> tuple:
+    """Return (items, library_size) for the whole library (movies AND shows,
+    regardless of the process_movies/process_tv_shows toggles), cached briefly.
+
+    Media-type selection is applied by callers in memory, so toggling it in the
+    preview never forces a rebuild.
+    """
+    sig = _connection_signature(config)
+    now = time.time()
+    cached = _CATALOG_CACHE
+    if cached["items"] is not None and cached["sig"] == sig and (now - cached["ts"]) < _CATALOG_TTL_SECONDS:
+        return cached["items"], cached["library_size"]
+
+    full_cfg = copy.deepcopy(config)
+    full_cfg.setdefault('media', {})
+    full_cfg['media']['process_movies'] = True
+    full_cfg['media']['process_tv_shows'] = True
+    items, library_size = _build_catalog(full_cfg)
+
+    _CATALOG_CACHE.update(sig=sig, ts=now, items=items, library_size=library_size)
+    return items, library_size
+
+
+def _genre_name(g) -> Optional[str]:
+    """Normalize a genre entry (string from *arr, or a {'tag': ...} dict) to a name."""
+    if isinstance(g, dict):
+        return g.get('tag')
+    return str(g) if g else None
+
+
+@app.post("/api/preview")
+async def preview_impact(request: PreviewRequest):
+    """Live preview of how many items (and how much space) the given, possibly
+    unsaved, filter settings would flag for removal. Re-filters the cached
+    catalog in memory - no writes, no removal, cheap enough to call as-you-type."""
+    from backend.core.filters import MediaFilter
+    try:
+        config = load_config()
+        items, library_size = _get_full_catalog(config)
+
+        # Merge the posted (unsaved) media block over the saved one, deep-merging
+        # the nested filters dict so partial payloads don't wipe other filters.
+        preview_config = copy.deepcopy(config)
+        posted = request.media or {}
+        merged_media = {**config.get('media', {}), **posted}
+        if 'filters' in posted:
+            merged_media['filters'] = {**config.get('media', {}).get('filters', {}), **(posted['filters'] or {})}
+        preview_config['media'] = merged_media
+
+        tautulli = TautulliAPI(config['tautulli']['url'], config['tautulli']['api_key'])
+        media_filter = MediaFilter(preview_config, tautulli)
+
+        process_movies = merged_media.get('process_movies', True)
+        process_tv = merged_media.get('process_tv_shows', True)
+
+        count = movies = shows = 0
+        reclaimable = 0
+        available_genres = set()
+
+        for it in items:
+            for g in it.get('genres') or []:
+                name = _genre_name(g)
+                if name:
+                    available_genres.add(name)
+
+            lt = it.get('library_type')
+            if lt == 'movie' and not process_movies:
+                continue
+            if lt == 'show' and not process_tv:
+                continue
+
+            if media_filter.is_old_enough(
+                it.get('last_played'), it.get('added_at'), it.get('play_count'), item_data=it
+            ):
+                count += 1
+                reclaimable += int(it.get('file_size') or 0)
+                if lt == 'movie':
+                    movies += 1
+                else:
+                    shows += 1
+
+        return {"success": True, "data": {
+            "count": count,
+            "movies": movies,
+            "shows": shows,
+            "reclaimable": reclaimable,
+            "library_size": library_size,
+            "available_genres": sorted(available_genres, key=str.lower),
+        }}
+
+    except Exception as e:
+        logger.error(f"Error building preview: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/candidates")

@@ -29,8 +29,9 @@ function appData() {
         candidates: null,
         searchQuery: '',
         confirmRemoval: false,
-        protectedKeywordsText: '',
         selectedCandidates: [],
+        previewData: null,
+        previewLoading: false,
         sortColumn: 'title',
         sortDirection: 'asc',
         toasts: [],
@@ -53,6 +54,7 @@ function appData() {
             if (!this.config?.media) return;
             this.config.media.process_movies = (type === 'both' || type === 'movies');
             this.config.media.process_tv_shows = (type === 'both' || type === 'tv');
+            this.schedulePreview();
         },
         get minSizeGB() {
             const b = this.config?.media?.filters?.min_file_size_to_keep || 0;
@@ -76,10 +78,7 @@ function appData() {
                 const data = await response.json();
                 if (data.success) {
                     this.config = data.data;
-                    // Convert protected keywords array to text
-                    if (this.config.media?.filters?.protected_keywords) {
-                        this.protectedKeywordsText = this.config.media.filters.protected_keywords.join('\n');
-                    }
+                    this.normalizeConfig();
                 }
             } catch (error) {
                 console.error('Error loading config:', error);
@@ -89,13 +88,71 @@ function appData() {
             }
         },
         
-        updateProtectedKeywords() {
-            // Convert text to array, filtering out empty lines
-            if (this.config.media?.filters) {
-                this.config.media.filters.protected_keywords = this.protectedKeywordsText
-                    .split('\n')
-                    .map(k => k.trim())
-                    .filter(k => k.length > 0);
+        // Ensure the config has the shape the settings UI binds to, migrating the
+        // legacy require_zero_play_count flag into the max_play_count threshold.
+        normalizeConfig() {
+            const media = this.config?.media;
+            if (!media) return;
+            if (media.max_play_count === undefined || media.max_play_count === null) {
+                media.max_play_count = media.require_zero_play_count ? 1 : 0;
+            }
+            media.filters = media.filters || {};
+            if (!Array.isArray(media.filters.protected_keywords)) media.filters.protected_keywords = [];
+            if (!Array.isArray(media.filters.protected_genres)) media.filters.protected_genres = [];
+        },
+
+        // --- Pill list helpers (protected keywords / genres) ---
+        addPill(listName, value) {
+            const v = (value || '').trim();
+            if (!v) return false;
+            const list = this.config.media.filters[listName];
+            if (!list.some(x => x.toLowerCase() === v.toLowerCase())) {
+                list.push(v);
+                this.schedulePreview();
+            }
+            return true;
+        },
+        removePill(listName, idx) {
+            this.config.media.filters[listName].splice(idx, 1);
+            this.schedulePreview();
+        },
+        // Library genres not already protected, for the click-to-add suggestions.
+        genreSuggestions() {
+            const all = this.previewData?.available_genres || [];
+            const chosen = (this.config?.media?.filters?.protected_genres || []).map(g => g.toLowerCase());
+            return all.filter(g => !chosen.includes(g.toLowerCase()));
+        },
+
+        // Effective minimum library age for a NEVER-watched title: both the
+        // added-date gate and the unwatched gate measure from the added date, so
+        // the larger of the two wins.
+        neverWatchedFloor() {
+            const a = Number(this.config?.media?.min_days_since_added) || 0;
+            const u = Number(this.config?.media?.days_unwatched) || 0;
+            return Math.max(a, u);
+        },
+
+        // --- Live filter-impact preview ---
+        schedulePreview() {
+            if (this.settingsTab !== 'filters' || !this.settingsOpen) return;
+            clearTimeout(this._previewTimer);
+            this._previewTimer = setTimeout(() => this.refreshPreview(), 450);
+        },
+        async refreshPreview() {
+            if (!this.config?.media) return;
+            this.previewLoading = true;
+            try {
+                const response = await fetch('/api/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ media: this.config.media }),
+                });
+                const data = await response.json();
+                if (data.success) this.previewData = data.data;
+            } catch (error) {
+                console.error('Error building preview:', error);
+            } finally {
+                this.previewLoading = false;
             }
         },
 
@@ -154,14 +211,15 @@ function appData() {
         },
 
         async saveSettings() {
-            this.updateProtectedKeywords();
+            // The threshold field supersedes the legacy flag; drop it to avoid two
+            // competing keys lingering in the saved config.
+            if (this.config?.media) delete this.config.media.require_zero_play_count;
             await this.saveConfig();               // persists + re-runs analysis (dashboard)
             if (this.candidates) await this.loadCandidates();  // keep the removal list in sync
             this.settingsOpen = false;
         },
 
         async applyFilters() {
-            this.updateProtectedKeywords();
             this.loading = true;
             try {
                 const response = await fetch('/api/config', {

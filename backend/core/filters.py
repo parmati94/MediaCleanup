@@ -35,36 +35,38 @@ class MediaFilter:
             True if meets age requirements
         """
         now = datetime.now()
-        
+        media_cfg = self.config['media']
+
         # Check if it's been long enough since added
         try:
             added_date = datetime.fromtimestamp(int(added_at))
             days_since_added = (now - added_date).days
-            if days_since_added < self.config['media']['min_days_since_added']:
+            if days_since_added < media_cfg['min_days_since_added']:
                 return False
         except (ValueError, TypeError):
             return False
-        
-        # If configured to only remove never-watched items, check play count
-        if self.config['media'].get('require_zero_play_count', False):
-            if play_count is None or play_count == 0:
-                # Never watched - only check if it's been long enough since added
-                return days_since_added >= self.config['media']['days_unwatched']
-            else:
-                # Has been watched at least once - don't remove
-                return False
-        
-        # Original logic: Check last played date
+
+        # Play-count protection: keep anything watched at least `max_play_count`
+        # times. 0 (or unset) disables it. The legacy `require_zero_play_count`
+        # flag maps to a threshold of 1 (only ever remove never-watched items).
+        max_play_count = media_cfg.get('max_play_count')
+        if max_play_count is None:
+            max_play_count = 1 if media_cfg.get('require_zero_play_count') else 0
+        if max_play_count and max_play_count > 0 and (play_count or 0) >= max_play_count:
+            return False
+
+        days_unwatched = media_cfg['days_unwatched']
+
+        # Staleness: measure from last watch, or from added date if never played.
         if last_played and last_played != '':
             try:
                 last_played_date = datetime.fromtimestamp(int(last_played))
                 days_since_played = (now - last_played_date).days
-                return days_since_played >= self.config['media']['days_unwatched']
+                return days_since_played >= days_unwatched
             except (ValueError, TypeError):
                 pass
-        
-        # If never played, check against added date
-        return days_since_added >= self.config['media']['days_unwatched']
+
+        return days_since_added >= days_unwatched
 
     def is_old_enough(self, last_played: Optional[str], added_at: str, play_count: Optional[int] = None, item_data: Optional[Dict[str, Any]] = None) -> bool:
         """Check if media is old enough to be considered for removal.

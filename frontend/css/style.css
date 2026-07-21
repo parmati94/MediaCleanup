@@ -54,4 +54,18 @@
   .eyebrow {
     @apply text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400;
   }
+
+  /* Removable tag chip for protected keywords / genres. */
+  .pill {
+    @apply inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-full text-sm font-medium bg-primary-100 text-primary-800 dark:bg-primary-900/40 dark:text-primary-200;
+  }
+
+  .pill-x {
+    @apply inline-flex items-center justify-center w-4 h-4 rounded-full text-primary-500 hover:text-white hover:bg-primary-500 dark:hover:bg-primary-600 leading-none text-base transition;
+  }
+
+  /* Ghost chip for click-to-add suggestions (library genres). */
+  .pill-suggest {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm font-medium border border-dashed border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-primary-400 hover:text-primary-600 dark:hover:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition;
+  }
 }
