@@ -24,12 +24,14 @@ function appData() {
         refreshing: false,
         settingsOpen: false,
         settingsTab: 'connections',
+        filtersOpen: false,
         config: null,
         analysis: null,
         candidates: null,
         searchQuery: '',
         confirmRemoval: false,
         selectedCandidates: [],
+        loadingCandidates: false,
         previewData: null,
         previewLoading: false,
         sortColumn: 'title',
@@ -67,6 +69,14 @@ function appData() {
         },
 
         async init() {
+            // Lazy-load the removal candidates the first time the tab is opened,
+            // so the list is populated on arrival instead of sitting empty until
+            // "Refresh List" is clicked manually.
+            this.$watch('currentTab', (tab) => {
+                if (tab === 'removal' && this.candidates === null && !this.loadingCandidates) {
+                    this.loadCandidates();
+                }
+            });
             await this.loadConfig();
             await this.runAnalysis(false);
         },
@@ -134,7 +144,7 @@ function appData() {
 
         // --- Live filter-impact preview ---
         schedulePreview() {
-            if (this.settingsTab !== 'filters' || !this.settingsOpen) return;
+            if (!this.filtersOpen) return;
             clearTimeout(this._previewTimer);
             this._previewTimer = setTimeout(() => this.refreshPreview(), 450);
         },
@@ -219,6 +229,44 @@ function appData() {
             this.settingsOpen = false;
         },
 
+        // Open the Removal Filters drawer and prime the live preview.
+        openFilters() {
+            this.filtersOpen = true;
+            this.refreshPreview();
+        },
+
+        // Just persist config.yaml — no dependent refreshes. Returns success bool.
+        async persistConfig() {
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config: this.config }),
+                });
+                const data = await response.json();
+                return !!data.success;
+            } catch (error) {
+                console.error('Error saving config:', error);
+                return false;
+            }
+        },
+
+        async saveFilters() {
+            if (this.config?.media) delete this.config.media.require_zero_play_count;
+            const ok = await this.persistConfig();
+            if (!ok) {
+                this.showError('Failed to save filters');
+                return;
+            }
+            // Close the drawer as soon as the config is persisted, then refresh the
+            // dependent views in the background (the removal list shows its own
+            // "updating" state) so the user isn't stuck staring at the filter panel.
+            this.filtersOpen = false;
+            this.showSuccess('Filters saved');
+            this.runAnalysis(false);
+            if (this.candidates || this.currentTab === 'removal') this.loadCandidates();
+        },
+
         async applyFilters() {
             this.loading = true;
             try {
@@ -282,6 +330,7 @@ function appData() {
 
         async loadCandidates() {
             this.loading = true;
+            this.loadingCandidates = true;
             try {
                 const response = await fetch('/api/candidates');
                 const data = await response.json();
@@ -294,6 +343,7 @@ function appData() {
                 this.showError('Failed to load removal candidates');
             } finally {
                 this.loading = false;
+                this.loadingCandidates = false;
             }
         },
         

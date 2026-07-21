@@ -3,6 +3,13 @@
         <div class="flex justify-between items-center mb-4">
             <div class="flex items-center space-x-4">
                 <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Remove Media</h2>
+                <span x-show="loadingCandidates && candidates" x-cloak class="inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 dark:text-primary-400">
+                    <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Updating list&hellip;
+                </span>
             </div>
             <button @click="loadCandidates" :disabled="loading" class="btn-primary">
                 <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -41,12 +48,23 @@
                 <span class="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-xs font-medium text-gray-700 dark:text-gray-300"
                       x-text="mediaType === 'both' ? 'Movies + TV' : (mediaType === 'movies' ? 'Movies' : 'TV')"></span>
                 <span class="text-sm text-gray-500 dark:text-gray-400">not played in <span class="num" x-text="config.media.days_unwatched"></span>d</span>
-                <span x-show="config.media.require_zero_play_count" class="text-sm text-gray-500 dark:text-gray-400">&middot; never-watched only</span>
-                <button @click="settingsTab = 'filters'; settingsOpen = true" class="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline ml-auto">Edit filters &rarr;</button>
+                <span x-show="config.media.max_play_count === 1" class="text-sm text-gray-500 dark:text-gray-400">&middot; never-watched only</span>
+                <span x-show="config.media.max_play_count > 1" class="text-sm text-gray-500 dark:text-gray-400">&middot; watched &lt; <span class="num" x-text="config.media.max_play_count"></span>&times;</span>
+                <button @click="openFilters()" class="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline ml-auto">Edit filters &rarr;</button>
             </div>
         </template>
 
-        <template x-if="!candidates">
+        <template x-if="loadingCandidates && !candidates">
+            <div class="text-center py-12">
+                <svg class="animate-spin mx-auto h-8 w-8 text-primary-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="text-gray-600 dark:text-gray-400 mt-4">Finding removal candidates&hellip;</p>
+            </div>
+        </template>
+
+        <template x-if="!loadingCandidates && !candidates">
             <div class="text-center py-12">
                 <p class="text-gray-600 dark:text-gray-400 mb-4">No candidates loaded. Click "Refresh List" to see what would be removed.</p>
             </div>
@@ -62,7 +80,7 @@
         </template>
 
         <template x-if="candidates && candidates.length > 0">
-            <div>
+            <div class="transition-opacity duration-200" :class="loadingCandidates ? 'opacity-40 pointer-events-none' : ''">
                 <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mb-6">
                     <p class="text-sm text-yellow-800 dark:text-yellow-200">
                         <strong x-text="candidates.length"></strong> items would be removed with the current configuration.

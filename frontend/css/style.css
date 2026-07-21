@@ -69,3 +69,15 @@
     @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm font-medium border border-dashed border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-primary-400 hover:text-primary-600 dark:hover:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition;
   }
 }
+
+/* Soft, expo-style easing for the filters slide-over so it glides rather than
+   snaps. will-change hints the compositor for a smoother transform. */
+.drawer-panel {
+  will-change: transform;
+}
+.drawer-ease-out {
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+.drawer-ease-in {
+  transition-timing-function: cubic-bezier(0.7, 0, 0.84, 0);
+}
