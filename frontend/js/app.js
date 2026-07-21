@@ -32,6 +32,8 @@ function appData() {
         confirmRemoval: false,
         selectedCandidates: [],
         loadingCandidates: false,
+        analysisAt: null,
+        candidatesAt: null,
         previewData: null,
         previewLoading: false,
         sortColumn: 'title',
@@ -68,17 +70,61 @@ function appData() {
             }
         },
 
+        // --- Local persistence: survive a plain page reload without re-fetching
+        // everything. State is restored instantly and only refreshed on demand. ---
+        _persist(key, value) {
+            try { localStorage.setItem('mc_' + key, JSON.stringify(value)); } catch (e) { /* quota/private mode */ }
+        },
+        _restore(key, fallback) {
+            try {
+                const v = localStorage.getItem('mc_' + key);
+                return v === null ? fallback : JSON.parse(v);
+            } catch (e) { return fallback; }
+        },
+        // Human-friendly "x ago" for the freshness hints.
+        timeAgo(ms) {
+            if (!ms) return '';
+            const s = Math.floor((Date.now() - ms) / 1000);
+            if (s < 45) return 'just now';
+            const m = Math.floor(s / 60);
+            if (m < 60) return `${Math.max(1, m)}m ago`;
+            const h = Math.floor(m / 60);
+            if (h < 24) return `${h}h ago`;
+            return `${Math.floor(h / 24)}d ago`;
+        },
+
         async init() {
-            // Lazy-load the removal candidates the first time the tab is opened,
-            // so the list is populated on arrival instead of sitting empty until
-            // "Refresh List" is clicked manually.
+            // Restore persisted state from the last session (instant, no re-fetch).
+            this.currentTab = this._restore('currentTab', 'dashboard');
+            this.connectionStatus = this._restore('connectionStatus', this.connectionStatus);
+            this.analysis = this._restore('analysis', null);
+            this.analysisAt = this._restore('analysisAt', null);
+            this.candidates = this._restore('candidates', null);
+            this.candidatesAt = this._restore('candidatesAt', null);
+
+            // Keep the persisted copies in sync as state changes.
+            this.$watch('currentTab', (v) => this._persist('currentTab', v));
+            this.$watch('analysis', (v) => this._persist('analysis', v));
+            this.$watch('candidates', (v) => this._persist('candidates', v));
+
+            // Lazy-load removal candidates the first time the tab is opened (unless
+            // a cached list was just restored).
             this.$watch('currentTab', (tab) => {
                 if (tab === 'removal' && this.candidates === null && !this.loadingCandidates) {
                     this.loadCandidates();
                 }
             });
+
             await this.loadConfig();
-            await this.runAnalysis(false);
+
+            // Only auto-run the analysis if we have nothing cached; otherwise the
+            // restored data stands until the user hits Refresh.
+            if (!this.analysis) {
+                await this.runAnalysis(false);
+            }
+            if (this.currentTab === 'removal' && this.candidates === null && !this.loadingCandidates) {
+                this.loadCandidates();
+            }
         },
 
         async loadConfig() {
@@ -210,6 +256,8 @@ function appData() {
                 const data = await response.json();
                 if (data.success) {
                     this.analysis = data.data;
+                    this.analysisAt = Date.now();
+                    this._persist('analysisAt', this.analysisAt);
                 }
             } catch (error) {
                 console.error('Error running analysis:', error);
@@ -298,6 +346,7 @@ function appData() {
             } catch (error) {
                 this.connectionStatus[service] = { success: false, message: 'Request failed' };
             }
+            this._persist('connectionStatus', this.connectionStatus);
         },
 
         async testAllConnections() {
@@ -336,6 +385,8 @@ function appData() {
                 const data = await response.json();
                 if (data.success) {
                     this.candidates = data.data;
+                    this.candidatesAt = Date.now();
+                    this._persist('candidatesAt', this.candidatesAt);
                     this.selectedCandidates = [];
                 }
             } catch (error) {

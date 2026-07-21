@@ -35,7 +35,8 @@
                             <span class="w-1.5 h-1.5 rounded-full" :class="config?.safety?.dry_run ? 'bg-amber-500' : 'bg-rose-500'"></span>
                             <span x-text="config?.safety?.dry_run ? 'Dry run' : 'LIVE'"></span>
                         </span>
-                        <div class="flex gap-2">
+                        <div class="flex items-center gap-2">
+                            <span x-show="analysisAt" x-cloak class="text-xs text-gray-400 dark:text-gray-500 mr-1" x-text="'Updated ' + timeAgo(analysisAt)"></span>
                             <button @click="runAnalysis(false)" :disabled="loading" class="btn-secondary text-sm py-1.5 px-3">Run analysis</button>
                             <button @click="currentTab = 'removal'" class="btn-primary text-sm py-1.5 px-4">Review candidates &rarr;</button>
                         </div>
