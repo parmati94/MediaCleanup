@@ -36,6 +36,12 @@ function appData() {
         candidatesAt: null,
         previewData: null,
         previewLoading: false,
+        history: null,
+        historyBatches: [],
+        historyLoading: false,
+        historyQuery: '',
+        historyType: 'all',
+        historyExpanded: {},
         sortColumn: 'title',
         sortDirection: 'asc',
         toasts: [],
@@ -113,6 +119,7 @@ function appData() {
                 if (tab === 'removal' && this.candidates === null && !this.loadingCandidates) {
                     this.loadCandidates();
                 }
+                if (tab === 'removed' && !this.historyLoading) this.loadHistory();
             });
 
             await this.loadConfig();
@@ -124,6 +131,111 @@ function appData() {
             }
             if (this.currentTab === 'removal' && this.candidates === null && !this.loadingCandidates) {
                 this.loadCandidates();
+            }
+            if (this.currentTab === 'removed') this.loadHistory();
+        },
+
+        // --- Removal history ("Removed" tab) ---
+        async loadHistory() {
+            this.historyLoading = true;
+            try {
+                const response = await fetch('/api/history');
+                const data = await response.json();
+                if (data.success) {
+                    this.history = data.data.removals;
+                    this.historyBatches = data.data.batches;
+                    // Resume polling for anything still re-adding (e.g. after a reload).
+                    this.history.filter(r => r.readd_status === 'running').forEach(r => this.pollReadd(r));
+                }
+            } catch (error) {
+                console.error('Error loading history:', error);
+                this.showError('Failed to load removal history');
+            } finally {
+                this.historyLoading = false;
+            }
+        },
+        filteredHistory() {
+            if (!this.history) return [];
+            const q = this.historyQuery.trim().toLowerCase();
+            return this.history.filter(r =>
+                (this.historyType === 'all' || r.media_type === this.historyType) &&
+                (!q || r.title.toLowerCase().includes(q) || String(r.year || '').includes(q) ||
+                    r.releases.some(x => (x.title || '').toLowerCase().includes(q) || (x.indexer || '').toLowerCase().includes(q))));
+        },
+        // Filtered items grouped by removal batch, newest batch first.
+        historyGroups() {
+            const byBatch = {};
+            for (const r of this.filteredHistory()) (byBatch[r.batch_id] = byBatch[r.batch_id] || []).push(r);
+            return this.historyBatches
+                .filter(b => byBatch[b.id])
+                .map(b => ({ ...b, rows: byBatch[b.id], shown_bytes: byBatch[b.id].reduce((t, r) => t + (r.size_bytes || 0), 0) }));
+        },
+        historyTotals() {
+            const rows = this.history || [];
+            return { items: rows.length, bytes: rows.reduce((t, r) => t + (r.size_bytes || 0), 0) };
+        },
+        toggleHistoryRow(id) {
+            this.historyExpanded[id] = !this.historyExpanded[id];
+        },
+        formatDateTime(iso) {
+            if (!iso) return '';
+            return new Date(iso).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        },
+        seasonLabel(seasons) {
+            if (!seasons || !seasons.length) return '';
+            return seasons.length === 1 ? `S${String(seasons[0]).padStart(2, '0')}` : `S${seasons.join(', S')}`;
+        },
+        // Releases for a show: collapse per-episode grabs into one line per season.
+        releaseGroups(item) {
+            if (item.media_type !== 'show') return item.releases.map(r => ({ label: '', releases: [r] }));
+            const groups = {};
+            for (const r of item.releases) {
+                const key = this.seasonLabel(r.seasons) || 'Other';
+                (groups[key] = groups[key] || []).push(r);
+            }
+            return Object.entries(groups).map(([label, releases]) => ({ label, releases }));
+        },
+        readdLabel(item) {
+            return {
+                running: 'Re-adding…', grabbed: 'Re-added', partial: 'Partly re-added',
+                searching: 'Re-added (searching)', failed: 'Re-add failed',
+            }[item.readd_status] || '';
+        },
+        async readdItem(item) {
+            const what = item.media_type === 'movie' ? 'Radarr' : 'Sonarr';
+            if (!confirm(`Re-add "${item.title}" to ${what} and download it again?`)) return;
+            try {
+                const response = await fetch(`/api/history/${item.id}/readd`, { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || 'Request failed');
+                item.readd_status = 'running';
+                item.readd_detail = 'Re-adding...';
+                this.historyExpanded[item.id] = true;
+                this.pollReadd(item);
+            } catch (error) {
+                this.showError(`Re-add failed: ${error.message}`);
+            }
+        },
+        async pollReadd(item) {
+            for (;;) {
+                await new Promise(r => setTimeout(r, 3000));
+                try {
+                    const response = await fetch(`/api/history/${item.id}/status`);
+                    const data = await response.json();
+                    Object.assign(item, data.data);
+                } catch (error) { continue; }
+                if (item.readd_status !== 'running') break;
+            }
+            if (item.readd_status === 'failed') this.showError(`Re-add of ${item.title} failed`);
+            else if (item.readd_status === 'grabbed') this.showSuccess(`${item.title}: original release sent to the download client`);
+            else this.showWarning(`${item.title}: re-added, ${item.readd_status === 'partial' ? 'some seasons' : 'release'} being searched for`);
+        },
+        async copyText(text, what) {
+            try {
+                await navigator.clipboard.writeText(text);
+                this.showSuccess(`${what} copied`);
+            } catch (e) {
+                window.prompt(`Copy ${what}:`, text);
             }
         },
 
@@ -538,6 +650,7 @@ function appData() {
                     this.confirmRemoval = false;
                     this.selectedCandidates = [];
                     // Refresh data
+                    if (this.history) this.loadHistory();
                     await this.runAnalysis(false);
                     await this.loadCandidates();
                 } else {

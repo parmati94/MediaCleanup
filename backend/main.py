@@ -11,12 +11,14 @@ from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import yaml
 
 from backend.core.analyzer import LibraryAnalyzer
 from backend.core.media_remover import MediaRemover
+from backend.core.history import HistoryStore, start_readd
 from backend.api.tautulli import TautulliAPI
 from backend.api.radarr import RadarrAPI
 from backend.api.sonarr import SonarrAPI
@@ -27,6 +29,16 @@ logger = logging.getLogger(__name__)
 
 # Config file path
 CONFIG_PATH = Path("/app/data/config.yaml")
+
+_history: Optional[HistoryStore] = None
+
+
+def get_history() -> HistoryStore:
+    """Removal-history store (SQLite under /app/data/history), opened on first use."""
+    global _history
+    if _history is None:
+        _history = HistoryStore()
+    return _history
 
 
 def load_config() -> Dict[str, Any]:
@@ -664,7 +676,15 @@ async def remove_media(request: RemovalRequest):
 
         remover = MediaRemover(config)
         if use_ids:
-            success = remover.remove_by_ids(request.ids)
+            # Watch data for the history record, from the catalog the UI was built on
+            # (if it's still cached - never rebuild it just for this).
+            watch = {i['id']: i for i in (_CATALOG_CACHE.get('items') or [])}
+            try:
+                history = get_history()
+            except Exception as e:
+                logger.error(f"Removal history unavailable, continuing without it: {e}")
+                history = None
+            success = remover.remove_by_ids(request.ids, history=history, watch=watch)
         else:
             success = remover.remove_by_rating_keys(request.rating_keys)
 
@@ -678,6 +698,69 @@ async def remove_media(request: RemovalRequest):
     except Exception as e:
         logger.error(f"Error during removal: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/history")
+def list_history():
+    """Everything MediaCleanup has removed, grouped into batches (no secrets)."""
+    try:
+        store = get_history()
+        return {"success": True, "data": {"removals": store.list_removals(), "batches": store.list_batches()}}
+    except Exception as e:
+        logger.error(f"Error reading removal history: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/history/export.csv")
+def export_history():
+    """CSV export of the removal history (tracker page + hash, never download URLs)."""
+    import csv
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(['removed_at', 'type', 'title', 'year', 'tmdb_id', 'tvdb_id', 'imdb_id', 'size_bytes',
+                'quality', 'path', 'last_played', 'play_count', 'releases', 'tracker_pages', 'info_hashes',
+                'readd_status'])
+    for r in get_history().list_removals():
+        rels = r['releases']
+        w.writerow([r['removed_at'], r['media_type'], r['title'], r['year'], r['tmdb_id'], r['tvdb_id'],
+                    r['imdb_id'], r['size_bytes'], r['quality'], r['path'],
+                    datetime.fromtimestamp(r['last_played']).date().isoformat() if r['last_played'] else '',
+                    r['play_count'],
+                    ' | '.join(x.get('title') or '' for x in rels),
+                    ' | '.join(x.get('info_url') or '' for x in rels),
+                    ' | '.join(x.get('info_hash') or '' for x in rels),
+                    r['readd_status'] or ''])
+    return Response(buf.getvalue(), media_type='text/csv',
+                    headers={'Content-Disposition': 'attachment; filename="mediacleanup-removed.csv"'})
+
+
+@app.get("/api/history/{removal_id}/status")
+def readd_status(removal_id: int):
+    rec = get_history().get_removal(removal_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"success": True, "data": {k: rec.get(k) for k in
+                                      ('id', 'readd_status', 'readd_detail', 'readd_at', 'new_arr_id')}}
+
+
+@app.post("/api/history/{removal_id}/readd")
+def readd_item(removal_id: int):
+    """Put a removed item back: re-create it in Radarr/Sonarr and hand back the
+    original release (falls back to a normal search). Runs in the background."""
+    store = get_history()
+    rec = store.get_removal(removal_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Not found")
+    config = load_config()
+    radarr = sonarr = None
+    if config.get('radarr', {}).get('enabled'):
+        radarr = RadarrAPI(config['radarr']['url'], config['radarr']['api_key'])
+    if config.get('sonarr', {}).get('enabled'):
+        sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
+    if not start_readd(store, removal_id, radarr, sonarr):
+        raise HTTPException(status_code=409, detail="A re-add for this item is already running")
+    return {"success": True, "message": f"Re-adding {rec['title']}"}
 
 
 @app.get("/api/libraries")

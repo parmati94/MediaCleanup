@@ -39,6 +39,13 @@ MediaCleanup helps you reclaim disk space by identifying and removing unwatched 
 - **Max Items Limit**: Backend enforcement of maximum items per run
 - **Toast Notifications**: Clear feedback for all operations
 
+### ♻️ **Removal History & Re-add**
+- Every removal is recorded (SQLite) *before* the delete, since Radarr/Sonarr wipe an item's history when it's deleted
+- Stores title, ids, path, size, watch data and the release that was on disk: indexer, tracker page, info hash and the grab's download link
+- **Removed** tab: removals grouped by batch with space freed, search, CSV export, copy hash / magnet
+- **Re-add** recreates the item with its original profile, root folder and monitoring, then hands the original release back to Radarr/Sonarr (release push, falling back to search-and-match on hash/title, then a normal search). Radarr/Sonarr do the download and import as usual
+- Download links contain tracker passkeys / indexer api keys: they stay in the local database and are never returned by the API or exported
+
 ### 🎨 **Modern UI/UX**
 - Built with Alpine.js and Tailwind CSS
 - Responsive design with dark mode support
@@ -146,6 +153,7 @@ MediaCleanup includes multiple safety layers to prevent accidental deletion:
 ### Data Persistence
 Configuration and logs are stored in the `./data` directory:
 - `data/config.yaml` - Configuration file
+- `data/history/history.db` - Removal history (keep out of git: contains tracker download links)
 - Container volume mount ensures data persists across restarts
 
 ## 🐛 Troubleshooting

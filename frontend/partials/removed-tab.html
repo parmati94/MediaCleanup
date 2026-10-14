@@ -1,0 +1,162 @@
+<div class="space-y-6">
+    <div class="card">
+        <div class="flex flex-wrap justify-between items-start gap-4 mb-6">
+            <div>
+                <div class="flex items-center gap-3">
+                    <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Removed</h2>
+                    <span x-show="historyLoading && history" x-cloak class="inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 dark:text-primary-400">
+                        <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                        Updating&hellip;
+                    </span>
+                </div>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Everything MediaCleanup has deleted, with the release that was on disk so it can be put back.</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <a href="/api/history/export.csv" class="btn-secondary text-sm">Export CSV</a>
+                <button @click="loadHistory()" :disabled="historyLoading" class="btn-primary text-sm">Refresh</button>
+            </div>
+        </div>
+
+        <template x-if="history">
+            <div>
+                <!-- Totals -->
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
+                    <div class="stat-tile">
+                        <div class="eyebrow">Items removed</div>
+                        <div class="num text-2xl font-semibold mt-1" x-text="historyTotals().items"></div>
+                    </div>
+                    <div class="stat-tile">
+                        <div class="eyebrow">Space freed</div>
+                        <div class="num text-2xl font-semibold mt-1" x-text="formatFileSize(historyTotals().bytes)"></div>
+                    </div>
+                    <div class="stat-tile hidden sm:block">
+                        <div class="eyebrow">Batches</div>
+                        <div class="num text-2xl font-semibold mt-1" x-text="historyBatches.length"></div>
+                    </div>
+                </div>
+
+                <!-- Search / type filter -->
+                <div class="flex flex-wrap gap-3 mb-4">
+                    <input type="text" x-model="historyQuery" placeholder="Search titles, releases, trackers..." class="input-field flex-1 min-w-[12rem]">
+                    <div class="inline-flex rounded-lg border border-gray-300 dark:border-gray-700 overflow-hidden text-sm">
+                        <template x-for="opt in [['all','All'],['movie','Movies'],['show','TV']]" :key="opt[0]">
+                            <button @click="historyType = opt[0]" x-text="opt[1]"
+                                    class="px-3 py-2 font-medium transition"
+                                    :class="historyType === opt[0] ? 'bg-primary-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'"></button>
+                        </template>
+                    </div>
+                </div>
+
+                <template x-if="history.length === 0">
+                    <p class="text-center py-12 text-gray-500 dark:text-gray-400">Nothing has been removed yet. Removals made from the Removal tab are recorded here automatically.</p>
+                </template>
+                <template x-if="history.length > 0 && historyGroups().length === 0">
+                    <p class="text-center py-12 text-gray-500 dark:text-gray-400">No removed items match.</p>
+                </template>
+
+                <!-- Batches -->
+                <div class="space-y-6">
+                    <template x-for="batch in historyGroups()" :key="batch.id">
+                        <section>
+                            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 pb-2 mb-2 border-b border-gray-200 dark:border-gray-700">
+                                <h3 class="font-semibold text-gray-900 dark:text-white" x-text="formatDateTime(batch.created_at)"></h3>
+                                <span class="text-sm text-gray-500 dark:text-gray-400">
+                                    <span class="num" x-text="batch.rows.length"></span> items &middot;
+                                    <span class="num" x-text="formatFileSize(batch.shown_bytes)"></span>
+                                </span>
+                                <span x-show="batch.source === 'backfill'" class="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
+                                      title="Recovered from Radarr/Sonarr backups after the fact">recovered from backups</span>
+                            </div>
+
+                            <div class="divide-y divide-gray-100 dark:divide-gray-800">
+                                <template x-for="item in batch.rows" :key="item.id">
+                                    <div>
+                                        <div class="flex items-center gap-3 py-2.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60 rounded-md px-2 -mx-2"
+                                             @click="toggleHistoryRow(item.id)">
+                                            <svg class="w-4 h-4 text-gray-400 flex-shrink-0 transition-transform" :class="historyExpanded[item.id] ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full flex-shrink-0"
+                                                  :class="item.media_type === 'movie' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'"
+                                                  x-text="item.media_type === 'movie' ? 'movie' : 'show'"></span>
+                                            <div class="min-w-0 flex-1">
+                                                <div class="text-sm text-gray-900 dark:text-white truncate">
+                                                    <span x-text="item.title"></span>
+                                                    <span class="text-gray-400" x-show="item.year" x-text="'(' + item.year + ')'"></span>
+                                                </div>
+                                                <div class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                                    <span class="sm:hidden num" x-text="formatFileSize(item.size_bytes) + ' · '"></span>
+                                                    <span x-text="item.quality || (item.releases[0] && item.releases[0].quality) || ''"></span>
+                                                    <span x-show="item.releases.length"> &middot; <span x-text="[...new Set(item.releases.map(r => r.indexer).filter(Boolean))].join(', ') || 'no tracker link'"></span></span>
+                                                    <span x-show="!item.releases.length"> &middot; no release on record</span>
+                                                </div>
+                                            </div>
+                                            <span class="hidden md:block text-xs text-gray-500 dark:text-gray-400 w-28 text-right" x-text="item.last_played ? 'watched ' + formatDate(item.last_played) : ''"></span>
+                                            <span class="hidden sm:block num text-sm text-gray-700 dark:text-gray-300 w-24 text-right flex-shrink-0" x-text="formatFileSize(item.size_bytes)"></span>
+                                            <div class="sm:w-40 flex justify-end flex-shrink-0" @click.stop>
+                                                <template x-if="!item.readd_status || item.readd_status === 'failed'">
+                                                    <button @click="readdItem(item)" class="text-sm font-medium px-3 py-1 rounded-md border border-primary-300 text-primary-700 hover:bg-primary-50 dark:border-primary-700 dark:text-primary-300 dark:hover:bg-primary-900/30"
+                                                            x-text="item.readd_status === 'failed' ? 'Retry re-add' : 'Re-add'"></button>
+                                                </template>
+                                                <template x-if="item.readd_status && item.readd_status !== 'failed'">
+                                                    <span class="text-xs font-medium px-2 py-1 rounded-md"
+                                                          :class="item.readd_status === 'running' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : (item.readd_status === 'grabbed' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200')"
+                                                          x-text="readdLabel(item)"></span>
+                                                </template>
+                                            </div>
+                                        </div>
+
+                                        <!-- Details -->
+                                        <div x-show="historyExpanded[item.id]" x-cloak class="ml-7 mb-3 mt-1 p-4 rounded-lg bg-gray-50 dark:bg-gray-800/50 text-sm space-y-3">
+                                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
+                                                <div>Removed <span class="text-gray-800 dark:text-gray-200" x-text="formatDateTime(item.removed_at)"></span></div>
+                                                <div>Last watched <span class="text-gray-800 dark:text-gray-200" x-text="item.last_played ? formatDate(item.last_played) : (item.batch_source === 'backfill' ? 'unknown' : 'never')"></span>
+                                                    <span x-show="item.play_count"> &middot; <span x-text="item.play_count"></span> plays</span></div>
+                                                <div class="sm:col-span-2 truncate">Path <span class="font-mono text-gray-800 dark:text-gray-200" x-text="item.path"></span></div>
+                                                <div class="sm:col-span-2 flex flex-wrap gap-x-4">
+                                                    <a x-show="item.tmdb_id" :href="'https://www.themoviedb.org/' + (item.media_type === 'movie' ? 'movie/' : 'tv/') + item.tmdb_id" target="_blank" rel="noopener" class="text-primary-600 dark:text-primary-400 hover:underline">TMDB</a>
+                                                    <a x-show="item.tvdb_id" :href="'https://thetvdb.com/dereferrer/series/' + item.tvdb_id" target="_blank" rel="noopener" class="text-primary-600 dark:text-primary-400 hover:underline">TVDB</a>
+                                                    <a x-show="item.imdb_id" :href="'https://www.imdb.com/title/' + item.imdb_id" target="_blank" rel="noopener" class="text-primary-600 dark:text-primary-400 hover:underline">IMDb</a>
+                                                </div>
+                                                <div x-show="item.capture_note && item.batch_source !== 'backfill'" class="sm:col-span-2 text-yellow-700 dark:text-yellow-300" x-text="item.capture_note"></div>
+                                            </div>
+
+                                            <div x-show="item.readd_detail" class="rounded-md p-3 text-xs whitespace-pre-line"
+                                                 :class="item.readd_status === 'failed' ? 'bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-200' : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300'"
+                                                 x-text="item.readd_detail"></div>
+
+                                            <div>
+                                                <div class="eyebrow mb-1.5">Release on disk</div>
+                                                <template x-if="!item.releases.length">
+                                                    <p class="text-xs text-gray-500 dark:text-gray-400">No grab on record (manually imported). Re-add will run a normal search.</p>
+                                                </template>
+                                                <div class="space-y-2">
+                                                    <template x-for="group in releaseGroups(item)" :key="group.label + group.releases[0].id">
+                                                        <div>
+                                                            <div x-show="group.label" class="text-xs font-semibold text-gray-500 dark:text-gray-400" x-text="group.label + (group.releases.length > 1 ? ' — ' + group.releases.length + ' releases' : '')"></div>
+                                                            <template x-for="rel in group.releases" :key="rel.id">
+                                                                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs py-0.5">
+                                                                    <span class="font-mono text-gray-800 dark:text-gray-200 break-all" x-text="rel.title"></span>
+                                                                    <span x-show="rel.indexer" class="px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300" x-text="rel.indexer"></span>
+                                                                    <a x-show="rel.info_url" :href="rel.info_url" target="_blank" rel="noopener" class="text-primary-600 dark:text-primary-400 hover:underline">tracker page</a>
+                                                                    <button x-show="rel.info_hash" @click="copyText(rel.info_hash, 'Info hash')" class="text-primary-600 dark:text-primary-400 hover:underline">copy hash</button>
+                                                                    <button x-show="rel.magnet" @click="copyText(rel.magnet, 'Magnet link')" class="text-primary-600 dark:text-primary-400 hover:underline">copy magnet</button>
+                                                                </div>
+                                                            </template>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </section>
+                    </template>
+                </div>
+            </div>
+        </template>
+
+        <template x-if="!history && historyLoading">
+            <p class="text-center py-12 text-gray-500 dark:text-gray-400">Loading removal history&hellip;</p>
+        </template>
+    </div>
+</div>

@@ -21,7 +21,7 @@ class SonarrAPI:
         self.session = requests.Session()
         self.session.headers.update({'X-Api-Key': api_key})
 
-    def _make_request(self, endpoint: str, method: str = 'GET', **kwargs) -> Any:
+    def _make_request(self, endpoint: str, method: str = 'GET', timeout: int = 30, **kwargs) -> Any:
         """Make a request to the Sonarr API.
         
         Args:
@@ -38,7 +38,7 @@ class SonarrAPI:
         url = f"{self.url}/api/v3/{endpoint}"
         
         try:
-            response = self.session.request(method, url, timeout=30, **kwargs)
+            response = self.session.request(method, url, timeout=timeout, **kwargs)
             response.raise_for_status()
             
             if response.content:
@@ -103,3 +103,48 @@ class SonarrAPI:
             if series.get('tvdbId') == tvdb_id:
                 return series
         return None
+
+    # --- Removal history / re-add support ---
+
+    def get_series_history(self, series_id: int) -> List[Dict[str, Any]]:
+        """All history events for one series, with episode details attached."""
+        return self._make_request('history/series',
+                                  params={'seriesId': series_id, 'includeEpisode': 'true'}) or []
+
+    def find_series_by_tvdb(self, tvdb_id: int) -> Optional[Dict[str, Any]]:
+        """The library series with this TVDB id, or None if it isn't in Sonarr."""
+        found = self._make_request('series', params={'tvdbId': tvdb_id}) or []
+        return found[0] if found else None
+
+    def lookup_series_by_tvdb(self, tvdb_id: int) -> Optional[Dict[str, Any]]:
+        """Metadata lookup used to build an add-series payload."""
+        found = self._make_request('series/lookup', params={'term': f'tvdb:{tvdb_id}'}) or []
+        return found[0] if found else None
+
+    def add_series(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._make_request('series', method='POST', json=payload)
+
+    def push_release(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Hand Sonarr a specific release; Sonarr decides on it and, if approved,
+        sends it to its download client."""
+        result = self._make_request('release/push', method='POST', json=payload, timeout=120)
+        return result if isinstance(result, list) else [result] if result else []
+
+    def search_releases(self, series_id: int, season_number: int) -> List[Dict[str, Any]]:
+        """Interactive season search across Sonarr's indexers (slow)."""
+        return self._make_request('release', params={'seriesId': series_id, 'seasonNumber': season_number},
+                                  timeout=300) or []
+
+    def grab_release(self, guid: str, indexer_id: int) -> Any:
+        """Grab a result from a recent interactive search."""
+        return self._make_request('release', method='POST',
+                                  json={'guid': guid, 'indexerId': indexer_id}, timeout=120)
+
+    def search_seasons(self, series_id: int, season_numbers: List[int]) -> None:
+        """Queue Sonarr's normal automatic search, per season (or whole series)."""
+        if not season_numbers:
+            self._make_request('command', method='POST', json={'name': 'SeriesSearch', 'seriesId': series_id})
+            return
+        for n in season_numbers:
+            self._make_request('command', method='POST',
+                               json={'name': 'SeasonSearch', 'seriesId': series_id, 'seasonNumber': n})

@@ -9,6 +9,7 @@ services:
     volumes:
       - ./data/config.yaml:/app/data/config.yaml
       - ./logs:/app/logs
+      - ./data/history:/app/data/history
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/health"]

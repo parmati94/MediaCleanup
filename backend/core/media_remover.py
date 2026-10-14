@@ -8,6 +8,7 @@ from backend.api.tautulli import TautulliAPI
 from backend.api.radarr import RadarrAPI
 from backend.api.sonarr import SonarrAPI
 from backend.core.filters import MediaFilter
+from backend.core.history import capture_movie, capture_series, minimal_record
 
 
 class MediaRemover:
@@ -203,18 +204,56 @@ class MediaRemover:
             logging.error(f"Error during selective removal process: {e}")
             return False
 
-    def remove_by_ids(self, ids: List[str]) -> bool:
+    def remove_by_ids(self, ids: List[str], history=None,
+                      watch: Optional[Dict[str, Dict[str, Any]]] = None) -> bool:
         """Remove specific items by 'type:arr_id' handles (e.g. 'movie:123', 'show:45').
 
         Deletes directly via Radarr/Sonarr by id - no Tautulli lookup or fuzzy title
         matching. Honors the configured dry_run and delete_files settings. In dry_run
         it only logs what would be removed and deletes nothing.
+
+        With a HistoryStore, each item is snapshotted (metadata, re-add spec and the
+        on-disk release with its tracker links) BEFORE the delete - Radarr/Sonarr drop
+        an item's history when it is deleted. `watch` maps handle -> watch data
+        (last_played/play_count) to record why it went.
         """
         logging.info(f"Starting selective removal of {len(ids)} items by id...")
 
         dry_run = self.config.get('safety', {}).get('dry_run', False)
         if dry_run:
             logging.info("DRY RUN MODE: No items will actually be removed")
+
+        batch_id = None
+        if history is not None and not dry_run:
+            batch_id = history.start_batch('app', filters=self.config.get('media'))
+
+        def capture(lib, arr_id):
+            """Snapshot one item and store it as pending; returns the record id."""
+            if batch_id is None:
+                return None
+            try:
+                if lib == 'movie':
+                    record = capture_movie(self.radarr, arr_id)
+                else:
+                    record = capture_series(self.sonarr, arr_id)
+            except Exception as e:
+                logging.warning(f"Could not capture {lib} {arr_id} for removal history: {e}")
+                record = minimal_record(lib, arr_id, e)
+            record.update({k: (watch or {}).get(f"{lib}:{arr_id}", {}).get(k)
+                           for k in ('last_played', 'play_count')})
+            try:
+                return history.add_removal(batch_id, record)
+            except Exception as e:
+                logging.error(f"Could not write removal history for {lib} {arr_id}: {e}")
+                return None
+
+        def settle(record_id, removed):
+            if record_id is None:
+                return
+            try:
+                history.mark_removed(record_id) if removed else history.discard(record_id)
+            except Exception as e:
+                logging.error(f"Could not update removal history record {record_id}: {e}")
 
         success_count = 0
         for handle in ids:
@@ -233,9 +272,12 @@ class MediaRemover:
                     logging.info(f"Would remove movie (Radarr id {arr_id})")
                     success_count += 1
                     continue
-                if self.radarr.delete_movie(arr_id,
-                                            delete_files=self.config['radarr']['delete_files'],
-                                            add_exclusion=self.config['radarr']['add_to_exclusion']):
+                record_id = capture('movie', arr_id)
+                removed = self.radarr.delete_movie(arr_id,
+                                                   delete_files=self.config['radarr']['delete_files'],
+                                                   add_exclusion=self.config['radarr']['add_to_exclusion'])
+                settle(record_id, removed)
+                if removed:
                     logging.info(f"Removed movie from Radarr (id {arr_id})")
                     success_count += 1
                 else:
@@ -249,9 +291,12 @@ class MediaRemover:
                     logging.info(f"Would remove series (Sonarr id {arr_id})")
                     success_count += 1
                     continue
-                if self.sonarr.delete_series(arr_id,
-                                             delete_files=self.config['sonarr']['delete_files'],
-                                             add_exclusion=self.config['sonarr']['add_to_exclusion']):
+                record_id = capture('show', arr_id)
+                removed = self.sonarr.delete_series(arr_id,
+                                                    delete_files=self.config['sonarr']['delete_files'],
+                                                    add_exclusion=self.config['sonarr']['add_to_exclusion'])
+                settle(record_id, removed)
+                if removed:
                     logging.info(f"Removed series from Sonarr (id {arr_id})")
                     success_count += 1
                 else:
