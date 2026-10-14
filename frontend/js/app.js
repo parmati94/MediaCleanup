@@ -161,12 +161,14 @@ function appData() {
         // shows up on its own. Stops once nothing is in flight or the tab is left.
         scheduleHistoryRefresh() {
             clearTimeout(this._historyTimer);
-            const inFlight = (this.history || []).some(r => ['grabbed', 'searching', 'partial'].includes(r.readd_status));
-            if (!inFlight) return;
+            const inFlight = (this.history || []).filter(r => ['grabbed', 'searching', 'partial'].includes(r.readd_status));
+            if (!inFlight.length) return;
+            // Imports from the download client finish in seconds - check back sooner.
+            const soon = inFlight.some(r => /imported it/.test(r.readd_detail || ''));
             this._historyTimer = setTimeout(() => {
                 if (this.currentTab === 'removed' && !document.hidden) this.loadHistory();
                 else this.scheduleHistoryRefresh();
-            }, 30000);
+            }, soon ? 5000 : 30000);
         },
         // 'removed' (still gone, incl. failed re-adds) | 'readding' (in flight) | 'restored'
         itemStatus(r) {
@@ -290,8 +292,11 @@ function appData() {
                 } catch (error) { continue; }
                 if (item.readd_status !== 'running') break;
             }
-            this.scheduleHistoryRefresh();
+            // Re-check right away: an import from the download client is already done,
+            // and a push shows real queue progress instead of a placeholder.
+            if (item.readd_status !== 'failed') await this.loadHistory();
             if (item.readd_status === 'failed') this.showError(`Re-add of ${item.title} failed`);
+            else if (/imported it/.test(item.readd_detail || '')) this.showSuccess(`${item.title}: imported from the download client`);
             else if (item.readd_status === 'grabbed') this.showSuccess(`${item.title}: original release sent to the download client`);
             else this.showWarning(`${item.title}: re-added, ${item.readd_status === 'partial' ? 'some seasons' : 'release'} being searched for`);
         },

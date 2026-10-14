@@ -436,8 +436,10 @@ def refresh_in_flight(store: HistoryStore, rows: List[Dict[str, Any]], radarr, s
                 row['readd_status'] = 'restored'
                 row['restored_at'] = now_iso()
             else:
-                row['readd_progress'] = _queue_progress(records) or (
-                    'Searching for a release' if row['readd_status'] == 'searching' else 'Waiting for download')
+                idle = ('Importing from download client' if 'imported it' in (row.get('readd_detail') or '')
+                        else 'Searching for a release' if row['readd_status'] == 'searching'
+                        else 'Waiting for download')
+                row['readd_progress'] = _queue_progress(records) or idle
         except Exception as e:
             resp = getattr(e, 'response', None)
             if resp is not None and resp.status_code == 404:
