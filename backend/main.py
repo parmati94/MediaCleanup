@@ -4,6 +4,7 @@ Media Cleanup UI - FastAPI Backend
 import copy
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -351,67 +352,155 @@ def _arr_rating(ratings: Optional[Dict[str, Any]], order) -> Optional[float]:
     return None
 
 
+def _add_play(movie_watch: dict, show_watch: dict, r: Dict[str, Any]) -> None:
+    """Fold one Tautulli history row into the watch maps."""
+    mt = r.get('media_type')
+    try:
+        date = int(r.get('date') or 0)
+    except (ValueError, TypeError):
+        date = 0
+    if mt == 'movie':
+        title = r.get('title') or r.get('full_title') or ''
+        target = movie_watch
+    elif mt == 'episode':
+        title = r.get('grandparent_title') or ''
+        target = show_watch
+    else:
+        return
+    if not title:
+        return
+    for k in _sonarr_radarr_title_keys(title):
+        if not k:
+            continue
+        entry = target.get(k)
+        if entry is None:
+            target[k] = {'last_played': date, 'play_count': 1}
+        else:
+            if date > (entry['last_played'] or 0):
+                entry['last_played'] = date
+            entry['play_count'] += 1
+
+
+# Tautulli's play log only grows, and re-reading all of it costs several seconds
+# (~2s per 10k-row page, mostly Tautulli's own overhead). Keep the folded maps in
+# memory and on later loads fetch only recent rows, skipping ones already counted.
+# A full rebuild every few hours picks up history deleted in Tautulli.
+_WATCH_CACHE: Dict[str, Any] = {"sig": None, "built": 0.0, "movie": None, "show": None,
+                                "row_ids": set(), "max_date": 0}
+_WATCH_LOCK = threading.Lock()
+_WATCH_FULL_REBUILD_SECONDS = 6 * 3600
+# Sessions are logged with their *start* date when they end, so a play can land
+# older than the newest row already seen - re-scan this far back on each refresh.
+_WATCH_OVERLAP_SECONDS = 6 * 3600
+_HISTORY_PAGE = 10000
+
+
+def _history_page(tau, start: int, length: int) -> Dict[str, Any]:
+    return tau._make_request('get_history', timeout=60, length=length, start=start,
+                             order_column='date', order_dir='desc')
+
+
+def _play_key(r: Dict[str, Any]) -> tuple:
+    """Identity of one history row. get_history doesn't return its row id, so use
+    fields that stay fixed for the life of a play: in-progress sessions are listed
+    too, and their stop time keeps moving until they end."""
+    return (r.get('started'), r.get('rating_key'), r.get('user_id'))
+
+
+def _rows(resp) -> List[Dict[str, Any]]:
+    return resp.get('data', []) if isinstance(resp, dict) else (resp or [])
+
+
 def _load_watch_map(config: Dict[str, Any]) -> tuple:
-    """Build watch maps from Tautulli's history (the complete play log) rather than
-    the lazily-cached media_info table.
+    """Watch maps from Tautulli's history (the complete play log) rather than the
+    lazily-cached media_info table.
 
     Returns (movie_watch, show_watch); each is {clean_title_key: {'last_played', 'play_count'}}.
     Movies key on the play's title; shows key on the show (grandparent) title. A title
     absent from the map has never been played.
     """
-    movie_watch: dict = {}
-    show_watch: dict = {}
     try:
         tau = TautulliAPI(config['tautulli']['url'], config['tautulli']['api_key'])
     except Exception as e:
         logger.warning(f"Could not init Tautulli for history: {e}")
-        return movie_watch, show_watch
+        return {}, {}
+    sig = (config['tautulli'].get('url'), config['tautulli'].get('api_key'))
 
-    start = 0
-    page = 10000
-    safety_cap = 500000
-    while start < safety_cap:
-        try:
-            resp = tau._make_request('get_history', timeout=60, length=page, start=start,
-                                     order_column='date', order_dir='desc')
-        except Exception as e:
-            logger.warning(f"Tautulli get_history failed at start={start}: {e}")
-            break
-        rows = resp.get('data', []) if isinstance(resp, dict) else resp
-        total = (resp.get('recordsFiltered') or resp.get('recordsTotal') or 0) if isinstance(resp, dict) else len(rows)
-        if not rows:
-            break
-        for r in rows:
-            mt = r.get('media_type')
+    with _WATCH_LOCK:
+        c = _WATCH_CACHE
+        fresh = c['movie'] is not None and c['sig'] == sig and \
+            time.time() - c['built'] < _WATCH_FULL_REBUILD_SECONDS
+        if fresh:
             try:
-                date = int(r.get('date') or 0)
-            except (ValueError, TypeError):
-                date = 0
-            if mt == 'movie':
-                title = r.get('title') or r.get('full_title') or ''
-                target = movie_watch
-            elif mt == 'episode':
-                title = r.get('grandparent_title') or ''
-                target = show_watch
-            else:
+                return _refresh_watch_map(tau)
+            except Exception as e:
+                logger.warning(f"Incremental Tautulli refresh failed, rebuilding: {e}")
+        return _rebuild_watch_map(tau, sig)
+
+
+def _refresh_watch_map(tau) -> tuple:
+    """Fold in plays newer than the cache (plus an overlap window). Caller holds the lock."""
+    c = _WATCH_CACHE
+    cutoff = c['max_date'] - _WATCH_OVERLAP_SECONDS
+    start, added, page = 0, 0, 1000
+    while True:
+        rows = _rows(_history_page(tau, start, page))
+        for r in rows:
+            rid = _play_key(r)
+            if rid in c['row_ids']:
                 continue
-            if not title:
-                continue
-            for k in _sonarr_radarr_title_keys(title):
-                if not k:
-                    continue
-                entry = target.get(k)
-                if entry is None:
-                    target[k] = {'last_played': date, 'play_count': 1}
-                else:
-                    if date > (entry['last_played'] or 0):
-                        entry['last_played'] = date
-                    entry['play_count'] += 1
-        start += len(rows)
-        if start >= total:
+            c['row_ids'].add(rid)
+            _add_play(c['movie'], c['show'], r)
+            c['max_date'] = max(c['max_date'], int(r.get('date') or 0))
+            added += 1
+        oldest = int(rows[-1].get('date') or 0) if rows else 0
+        if len(rows) < page or oldest < cutoff:
             break
-    logger.info(f"Loaded Tautulli history: {len(movie_watch)} movie keys, {len(show_watch)} show keys")
+        start += page
+    if added:
+        logger.info(f"Tautulli history: {added} new play(s) since last load")
+    return c['movie'], c['show']
+
+
+def _rebuild_watch_map(tau, sig) -> tuple:
+    """Read the whole play log (pages fetched in parallel). Caller holds the lock."""
+    from concurrent.futures import ThreadPoolExecutor
+    movie_watch: dict = {}
+    show_watch: dict = {}
+    try:
+        first = _history_page(tau, 0, _HISTORY_PAGE)
+    except Exception as e:
+        logger.warning(f"Tautulli get_history failed: {e}")
+        return movie_watch, show_watch
+    total = (first.get('recordsFiltered') or first.get('recordsTotal') or 0) if isinstance(first, dict) else 0
+    pages = [_rows(first)]
+    starts = list(range(_HISTORY_PAGE, min(total, 500000), _HISTORY_PAGE))
+    if starts:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            pages += [_rows(p) for p in pool.map(lambda st: _history_page(tau, st, _HISTORY_PAGE), starts)]
+
+    row_ids, max_date = set(), 0
+    for rows in pages:
+        for r in rows:
+            key = _play_key(r)
+            if key in row_ids:
+                continue  # rows can shift between pages if a play lands mid-read
+            row_ids.add(key)
+            _add_play(movie_watch, show_watch, r)
+            max_date = max(max_date, int(r.get('date') or 0))
+    _WATCH_CACHE.update(sig=sig, built=time.time(), movie=movie_watch, show=show_watch,
+                        row_ids=row_ids, max_date=max_date)
+    logger.info(f"Loaded Tautulli history: {len(row_ids)} plays, {len(movie_watch)} movie keys, {len(show_watch)} show keys")
     return movie_watch, show_watch
+
+
+def watch_for(lib: str, title: str) -> Dict[str, Any]:
+    """Cached watch data for one title (for the removal-history record)."""
+    target = _WATCH_CACHE['movie' if lib == 'movie' else 'show'] or {}
+    for k in _sonarr_radarr_title_keys(title or ''):
+        if k in target:
+            return target[k]
+    return {}
 
 
 def _catalog_item(lib, arr_id, title, year, size, added_iso, genres, rating, audience, clean_title, watch_map):
@@ -447,14 +536,33 @@ def _build_catalog(config: Dict[str, Any]) -> tuple:
     complete/current, sizes are exact, and each item carries its Radarr/Sonarr id so
     removal can target it precisely.
     """
-    movie_watch, show_watch = _load_watch_map(config)
+    from concurrent.futures import ThreadPoolExecutor
+    want_movies = config.get('radarr', {}).get('enabled') and config['media'].get('process_movies', True)
+    want_shows = config.get('sonarr', {}).get('enabled') and config['media'].get('process_tv_shows', True)
+
+    def fetch(fn):
+        try:
+            return fn(), None
+        except Exception as e:
+            return None, e
+
+    # Tautulli, Radarr and Sonarr are independent - fetch them concurrently.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_watch = pool.submit(_load_watch_map, config)
+        f_movies = pool.submit(fetch, lambda: RadarrAPI(config['radarr']['url'], config['radarr']['api_key']).get_movies()) if want_movies else None
+        f_series = pool.submit(fetch, lambda: SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key']).get_series()) if want_shows else None
+        movie_watch, show_watch = f_watch.result()
+        movies, movies_err = f_movies.result() if f_movies else (None, None)
+        series, series_err = f_series.result() if f_series else (None, None)
+
     items: List[Dict[str, Any]] = []
     library_size = 0
 
-    if config.get('radarr', {}).get('enabled') and config['media'].get('process_movies', True):
+    if want_movies:
         try:
-            radarr = RadarrAPI(config['radarr']['url'], config['radarr']['api_key'])
-            for mv in radarr.get_movies():
+            if movies_err:
+                raise movies_err
+            for mv in movies:
                 size = mv.get('sizeOnDisk') or 0
                 if not size:
                     continue
@@ -469,10 +577,11 @@ def _build_catalog(config: Dict[str, Any]) -> tuple:
         except Exception as e:
             logger.warning(f"Could not load Radarr catalog: {e}")
 
-    if config.get('sonarr', {}).get('enabled') and config['media'].get('process_tv_shows', True):
+    if want_shows:
         try:
-            sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
-            for sr in sonarr.get_series():
+            if series_err:
+                raise series_err
+            for sr in series:
                 size = (sr.get('statistics') or {}).get('sizeOnDisk') or 0
                 if not size:
                     continue
@@ -676,15 +785,13 @@ async def remove_media(request: RemovalRequest):
 
         remover = MediaRemover(config)
         if use_ids:
-            # Watch data for the history record, from the catalog the UI was built on
-            # (if it's still cached - never rebuild it just for this).
-            watch = {i['id']: i for i in (_CATALOG_CACHE.get('items') or [])}
             try:
                 history = get_history()
             except Exception as e:
                 logger.error(f"Removal history unavailable, continuing without it: {e}")
                 history = None
-            success = remover.remove_by_ids(request.ids, history=history, watch=watch)
+            success = remover.remove_by_ids(request.ids, history=history, watch=watch_for)
+            _CATALOG_CACHE['items'] = None   # the preview must not show what was just removed
         else:
             success = remover.remove_by_rating_keys(request.rating_keys)
 
@@ -769,6 +876,7 @@ def readd_item(removal_id: int):
         sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
     if not start_readd(store, removal_id, radarr, sonarr):
         raise HTTPException(status_code=409, detail="A re-add for this item is already running")
+    _CATALOG_CACHE['items'] = None
     return {"success": True, "message": f"Re-adding {rec['title']}"}
 
 

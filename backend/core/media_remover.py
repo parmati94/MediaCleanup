@@ -204,8 +204,7 @@ class MediaRemover:
             logging.error(f"Error during selective removal process: {e}")
             return False
 
-    def remove_by_ids(self, ids: List[str], history=None,
-                      watch: Optional[Dict[str, Dict[str, Any]]] = None) -> bool:
+    def remove_by_ids(self, ids: List[str], history=None, watch=None) -> bool:
         """Remove specific items by 'type:arr_id' handles (e.g. 'movie:123', 'show:45').
 
         Deletes directly via Radarr/Sonarr by id - no Tautulli lookup or fuzzy title
@@ -214,8 +213,8 @@ class MediaRemover:
 
         With a HistoryStore, each item is snapshotted (metadata, re-add spec and the
         on-disk release with its tracker links) BEFORE the delete - Radarr/Sonarr drop
-        an item's history when it is deleted. `watch` maps handle -> watch data
-        (last_played/play_count) to record why it went.
+        an item's history when it is deleted. `watch(lib, title)` returns watch
+        data (last_played/play_count) to record why it went.
         """
         logging.info(f"Starting selective removal of {len(ids)} items by id...")
 
@@ -239,8 +238,8 @@ class MediaRemover:
             except Exception as e:
                 logging.warning(f"Could not capture {lib} {arr_id} for removal history: {e}")
                 record = minimal_record(lib, arr_id, e)
-            record.update({k: (watch or {}).get(f"{lib}:{arr_id}", {}).get(k)
-                           for k in ('last_played', 'play_count')})
+            seen = watch(lib, record.get('title')) if watch else {}
+            record.update(last_played=seen.get('last_played'), play_count=seen.get('play_count', 0))
             logging.info(f"Captured '{record.get('title')}' for removal history "
                          f"({len(record.get('releases') or [])} original release(s))")
             try:
