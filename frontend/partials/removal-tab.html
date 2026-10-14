@@ -210,13 +210,12 @@
                 </ul>
             </div>
             <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
-            <button @click="selectionOpen = !selectionOpen" class="inline-flex items-center gap-1.5 text-sm group" :aria-expanded="selectionOpen">
+            <button @click="selectionOpen = !selectionOpen" class="inline-flex items-center gap-1.5 text-sm group" :aria-expanded="selectionOpen" :title="selectionOpen ? 'Hide selection' : 'Show selection'">
                 <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 transition-transform" :class="selectionOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
                 <span class="num font-semibold text-gray-900 dark:text-white" x-text="selectedCandidates.length"></span>
                 <span class="text-gray-500 dark:text-gray-400">
                     <span x-show="selectionLimit() !== Infinity" x-text="'of max ' + selectionLimit() + ' '"></span>selected &middot;</span>
                 <span class="num font-semibold text-gray-900 dark:text-white" x-text="formatFileSize(selectedBytes())"></span>
-                <span class="text-xs font-medium text-primary-600 dark:text-primary-400 group-hover:underline ml-1" x-text="selectionOpen ? 'Hide' : 'Show'"></span>
             </button>
             <button @click="selectedCandidates = []; selectionOpen = false" class="text-sm font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">Clear</button>
             <button @click="reviewRemoval()" :disabled="loading"
