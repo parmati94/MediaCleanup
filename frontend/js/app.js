@@ -50,6 +50,17 @@ function appData() {
         dialog: { open: false, title: '', message: '', details: [], list: [], listTitle: '', requireText: '', typed: '', confirmLabel: 'Confirm', cancelLabel: 'Cancel', tone: 'primary' },
         sortColumn: 'title',
         sortDirection: 'asc',
+        // Removal table columns (Title and the checkbox are always shown).
+        removalColumns: [
+            { key: 'last_played', label: 'Last watched', cls: 'hidden sm:table-cell' },
+            { key: 'play_count', label: 'Plays', cls: 'hidden sm:table-cell' },
+            { key: 'added_at', label: 'Added', cls: 'hidden sm:table-cell' },
+            { key: 'quality', label: 'Quality', cls: 'hidden sm:table-cell', hidden: true },   // off by default
+            { key: 'library_type', label: 'Type', cls: 'hidden md:table-cell' },
+            { key: 'file_size', label: 'Size', cls: 'hidden sm:table-cell text-right' },
+        ],
+        hiddenColumns: [],
+        columnMenuOpen: false,
         toasts: [],
         connectionStatus: {
             tautulli: null,
@@ -86,7 +97,7 @@ function appData() {
         // everything. State is restored instantly and only refreshed on demand. ---
         // Bump when the shape of cached data changes, so a reload after an update
         // doesn't show lists saved by the previous version (e.g. without posters).
-        _cacheVersion: 2,
+        _cacheVersion: 3,
         _persist(key, value) {
             try { localStorage.setItem(`mc${this._cacheVersion}_${key}`, JSON.stringify(value)); } catch (e) { /* quota/private mode */ }
         },
@@ -118,6 +129,10 @@ function appData() {
             this.analysisAt = this._restore('analysisAt', null);
             this.candidates = this._restore('candidates', null);
             this.candidatesAt = this._restore('candidatesAt', null);
+            // Column choices are a preference, not cached data: kept outside the
+            // versioned cache so a cache bump doesn't reset them.
+            try { this.hiddenColumns = JSON.parse(localStorage.getItem('mediacleanup_hiddenColumns')) ?? this.defaultHiddenColumns(); } catch (e) { this.hiddenColumns = this.defaultHiddenColumns(); }
+            this.$watch('hiddenColumns', (v) => { try { localStorage.setItem('mediacleanup_hiddenColumns', JSON.stringify(v)); } catch (e) { /* ignore */ } });
 
             // Keep the persisted copies in sync as state changes.
             this.$watch('currentTab', (v) => this._persist('currentTab', v));
@@ -665,6 +680,57 @@ function appData() {
         },
         // Max items per removal (Settings → Safety). Enforced while selecting, not
         // just by the backend at the end.
+        // --- Removal table columns ---
+        colOn(key) {
+            return !this.hiddenColumns.includes(key);
+        },
+        shownColumns() {
+            return this.removalColumns.filter(c => this.colOn(c.key));
+        },
+        toggleColumn(key) {
+            if (this.colOn(key)) {
+                this.hiddenColumns = [...this.hiddenColumns, key];
+                // Sorting by a column you can't see is confusing: fall back to title.
+                if (this.sortColumn === key) { this.sortColumn = 'title'; this.sortDirection = 'asc'; }
+            } else {
+                this.hiddenColumns = this.hiddenColumns.filter(k => k !== key);
+            }
+        },
+        defaultHiddenColumns() {
+            return this.removalColumns.filter(c => c.hidden).map(c => c.key);
+        },
+        columnsAreDefault() {
+            const d = this.defaultHiddenColumns();
+            return d.length === this.hiddenColumns.length && d.every(k => this.hiddenColumns.includes(k));
+        },
+        resetColumns() {
+            this.hiddenColumns = this.defaultHiddenColumns();
+        },
+        // "8 mo ago" for the Added column (epoch seconds).
+        formatAge(epoch) {
+            if (!epoch) return '';
+            const d = Math.floor((Date.now() / 1000 - epoch) / 86400);
+            if (d < 1) return 'Today';
+            if (d < 30) return `${d}d ago`;
+            if (d < 365) return `${Math.floor(d / 30)} mo ago`;
+            return `${(d / 365).toFixed(1).replace(/\.0$/, '')} yr ago`;
+        },
+        formatDay(epoch) {
+            return epoch ? new Date(epoch * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+        },
+        // Phone layout has no columns: the visible ones go on the subtitle line instead.
+        mobileMeta(item) {
+            const parts = [];
+            for (const c of this.shownColumns()) {
+                if (c.key === 'last_played') parts.push(item.last_played ? 'watched ' + this.formatDate(item.last_played) : 'never watched');
+                else if (c.key === 'play_count' && item.play_count) parts.push(`${item.play_count} plays`);
+                else if (c.key === 'added_at' && item.added_at) parts.push('added ' + this.formatAge(item.added_at));
+                else if (c.key === 'quality' && item.quality) parts.push(item.quality.label);
+                else if (c.key === 'file_size') parts.push(this.formatFileSize(item.file_size));
+            }
+            return parts.length ? ' · ' + parts.join(' · ') : '';
+        },
+
         selectionLimit() {
             return Number(this.config?.safety?.max_items_per_run) || Infinity;
         },
@@ -760,8 +826,8 @@ function appData() {
             
             // Apply sorting
             const sorted = [...filtered].sort((a, b) => {
-                let aVal = a[this.sortColumn];
-                let bVal = b[this.sortColumn];
+                let aVal = this.sortColumn === 'quality' ? a.quality?.rank : a[this.sortColumn];
+                let bVal = this.sortColumn === 'quality' ? b.quality?.rank : b[this.sortColumn];
                 
                 // Handle nulls
                 if (aVal === null || aVal === undefined) return 1;

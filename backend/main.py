@@ -547,6 +547,10 @@ def _watch_warmer() -> None:
         _load_watch_map(load_config())
     except Exception as e:
         logger.warning(f"Startup Tautulli history warm-up failed (will load on demand): {e}")
+    try:
+        _warm_show_quality()
+    except Exception as e:
+        logger.warning(f"Show quality warm-up failed (will load on demand): {e}")
     while True:
         time.sleep(_WATCH_REFRESH_SECONDS)
         try:
@@ -558,6 +562,10 @@ def _watch_warmer() -> None:
                 _store_watch_map(sig, data)
         except Exception as e:
             logger.warning(f"Background Tautulli history refresh failed, keeping the last good copy: {e}")
+        try:
+            _warm_show_quality()
+        except Exception as e:
+            logger.warning(f"Background show quality refresh failed: {e}")
 
 
 def watch_for(lib: str, title: str) -> Dict[str, Any]:
@@ -569,7 +577,104 @@ def watch_for(lib: str, title: str) -> Dict[str, Any]:
     return {}
 
 
-def _catalog_item(lib, arr_id, title, year, size, added_iso, genres, rating, audience, clean_title, watch_map, poster=None):
+_SOURCE_RANK = {'Remux': 5, 'BluRay': 4, 'WEB': 3, 'TV': 2, 'DVD': 1}
+
+
+def _quality_info(quality: Optional[Dict[str, Any]], media_info: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """Short quality label ("2160p Remux", "1080p WEB") from a Radarr/Sonarr file's
+    quality block, a sort rank (resolution first, then source) and an HDR/DV tag."""
+    q = (quality or {}).get('quality') or {}
+    name = q.get('name') or ''
+    if not name or name.lower() == 'unknown':
+        return None
+    res = q.get('resolution') or 0
+    low = name.lower()
+    if 'remux' in low or q.get('modifier') == 'remux':
+        src = 'Remux'
+    elif 'bluray' in low or 'brdisk' in low:
+        src = 'BluRay'
+    elif low.startswith('web'):
+        src = 'WEB'
+    elif 'tv' in low:
+        src = 'TV'
+    elif 'dvd' in low:
+        src = 'DVD'
+    else:
+        src = None
+    if src:
+        label = f"{res}p {src}" if res else f"SD {src}"
+    else:
+        label = name
+    hdr_type = (media_info or {}).get('videoDynamicRangeType') or ''
+    hdr = 'DV' if hdr_type.upper().startswith('DV') else ('HDR' if hdr_type else None)
+    return {'label': label, 'rank': res * 10 + _SOURCE_RANK.get(src, 0), 'hdr': hdr, 'mixed': False,
+            'detail': name + (f" · {hdr_type}" if hdr_type else '')}
+
+
+def _show_quality(files: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """A show's quality = the one holding the most bytes; 'mixed' when there's more
+    than one, with the per-quality share in 'detail'."""
+    groups: Dict[str, Dict[str, Any]] = {}
+    total = 0
+    for f in files:
+        info = _quality_info(f.get('quality'), f.get('mediaInfo'))
+        if not info:
+            continue
+        size = f.get('size') or 0
+        total += size
+        g = groups.setdefault(info['label'], {'info': info, 'bytes': 0, 'hdr': 0})
+        g['bytes'] += size
+        if info['hdr']:
+            g['hdr'] += size
+    if not groups:
+        return None
+    ranked = sorted(groups.values(), key=lambda g: g['bytes'], reverse=True)
+    top = dict(ranked[0]['info'])
+    # HDR tag only when most of the main quality's bytes are HDR/DV.
+    if ranked[0]['hdr'] * 2 < ranked[0]['bytes']:
+        top['hdr'] = None
+    top['mixed'] = len(ranked) > 1
+    top['detail'] = ' / '.join(
+        f"{g['info']['label']} · {round(g['bytes'] * 100 / total) if total else 0}%" for g in ranked)
+    return top
+
+
+# Show quality needs one Sonarr call per series, so it's cached per series and
+# only re-read when the series' size on disk changes (new or upgraded episodes).
+_SHOW_QUALITY: Dict[int, tuple] = {}   # series id -> (size on disk, quality info)
+
+
+def _fill_show_quality(config: Dict[str, Any], shows: List[Dict[str, Any]]) -> None:
+    """Set item['quality'] on show items, fetching only uncached/changed series."""
+    stale = [s for s in shows if (_SHOW_QUALITY.get(s['arr_id']) or (None,))[0] != s.get('file_size')]
+    if stale and config.get('sonarr', {}).get('enabled'):
+        from concurrent.futures import ThreadPoolExecutor
+        sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
+
+        def load(item):
+            try:
+                _SHOW_QUALITY[item['arr_id']] = (item.get('file_size'), _show_quality(sonarr.get_episode_files(item['arr_id'])))
+            except Exception as e:
+                logger.debug(f"Episode files for series {item['arr_id']} failed: {e}")
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            list(pool.map(load, stale))
+        logger.info(f"Show quality: read {len(stale)} series from Sonarr")
+    for s in shows:
+        s['quality'] = (_SHOW_QUALITY.get(s['arr_id']) or (None, None))[1]
+
+
+def _warm_show_quality() -> None:
+    """Read every show's quality ahead of time so no page load pays for it."""
+    config = load_config()
+    if not config.get('sonarr', {}).get('enabled'):
+        return
+    series = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key']).get_series()
+    _fill_show_quality(config, [{'arr_id': s.get('id'), 'file_size': (s.get('statistics') or {}).get('sizeOnDisk') or 0}
+                                for s in series if (s.get('statistics') or {}).get('sizeOnDisk')])
+
+
+def _catalog_item(lib, arr_id, title, year, size, added_iso, genres, rating, audience, clean_title, watch_map, poster=None, quality=None):
     """Assemble one catalog item (Radarr/Sonarr fields + joined Tautulli watch data)."""
     watch = None
     for k in _sonarr_radarr_title_keys(title or '', clean_title):
@@ -592,6 +697,7 @@ def _catalog_item(lib, arr_id, title, year, size, added_iso, genres, rating, aud
         'rating': rating,
         'audience_rating': audience,
         'poster': poster,
+        'quality': quality,
     }
 
 
@@ -639,7 +745,8 @@ def _build_catalog(config: Dict[str, Any]) -> tuple:
                     mv.get('added'), mv.get('genres'),
                     _arr_rating(mv.get('ratings'), ('imdb', 'tmdb', 'trakt')),
                     _arr_rating(mv.get('ratings'), ('tmdb', 'trakt', 'imdb')),
-                    mv.get('cleanTitle'), movie_watch, poster_url(mv.get('images'))))
+                    mv.get('cleanTitle'), movie_watch, poster_url(mv.get('images')),
+                    _quality_info((mv.get('movieFile') or {}).get('quality'), (mv.get('movieFile') or {}).get('mediaInfo'))))
             logger.info(f"Radarr catalog: {sum(1 for i in items if i['library_type']=='movie')} movies with files")
         except Exception as e:
             logger.warning(f"Could not load Radarr catalog: {e}")
@@ -809,7 +916,14 @@ async def get_removal_candidates():
                     'play_count': item.get('play_count', 0),
                     'file_size': item.get('file_size', 0),
                     'poster': item.get('poster'),
+                    'quality': item.get('quality'),
                 })
+
+        # Shows' quality comes from their episode files (cached, pre-warmed at startup).
+        try:
+            _fill_show_quality(config, [c for c in candidates if c['library_type'] == 'show'])
+        except Exception as e:
+            logger.warning(f"Could not load show quality: {e}")
 
         return {"success": True, "data": candidates}
 

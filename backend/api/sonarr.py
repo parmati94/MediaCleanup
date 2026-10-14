@@ -111,6 +111,10 @@ class SonarrAPI:
         return self._make_request('history/series',
                                   params={'seriesId': series_id, 'includeEpisode': 'true'}) or []
 
+    def get_episode_files(self, series_id: int) -> List[Dict[str, Any]]:
+        """Every episode file of one series (quality, size, mediaInfo)."""
+        return self._make_request('episodefile', params={'seriesId': series_id}) or []
+
     def find_series_by_tvdb(self, tvdb_id: int) -> Optional[Dict[str, Any]]:
         """The library series with this TVDB id, or None if it isn't in Sonarr."""
         found = self._make_request('series', params={'tvdbId': tvdb_id}) or []
