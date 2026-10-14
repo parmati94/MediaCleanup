@@ -114,6 +114,7 @@ async def lifespan(app: FastAPI):
     if not CONFIG_PATH.exists():
         logger.info(f"No config file found — writing defaults to {CONFIG_PATH}")
         save_config(get_default_config())
+    threading.Thread(target=_watch_warmer, name="watch-warmer", daemon=True).start()
     yield
     logger.info("Shutting down Media Cleanup UI backend")
 
@@ -417,25 +418,28 @@ def _load_watch_map(config: Dict[str, Any]) -> tuple:
 
     Returns (movie_watch, show_watch); each is {clean_title_key: {'last_played', 'play_count'}}.
     Movies key on the play's title; shows key on the show (grandparent) title. A title
-    absent from the map has never been played.
+    absent from the map has never been played - so an empty map must never be
+    returned just because Tautulli was unreachable: that would make the whole library
+    look unwatched. On failure the last good maps are used, or the error propagates.
     """
-    try:
-        tau = TautulliAPI(config['tautulli']['url'], config['tautulli']['api_key'])
-    except Exception as e:
-        logger.warning(f"Could not init Tautulli for history: {e}")
-        return {}, {}
+    tau = TautulliAPI(config['tautulli']['url'], config['tautulli']['api_key'])
     sig = (config['tautulli'].get('url'), config['tautulli'].get('api_key'))
 
     with _WATCH_LOCK:
         c = _WATCH_CACHE
-        fresh = c['movie'] is not None and c['sig'] == sig and \
-            time.time() - c['built'] < _WATCH_FULL_REBUILD_SECONDS
-        if fresh:
+        have = c['movie'] is not None and c['sig'] == sig
+        if have and time.time() - c['built'] < _WATCH_FULL_REBUILD_SECONDS:
             try:
                 return _refresh_watch_map(tau)
             except Exception as e:
                 logger.warning(f"Incremental Tautulli refresh failed, rebuilding: {e}")
-        return _rebuild_watch_map(tau, sig)
+        try:
+            _store_watch_map(sig, _read_watch_history(tau))
+        except Exception as e:
+            if not have:
+                raise RuntimeError(f"Could not read Tautulli watch history: {e}") from e
+            logger.warning(f"Tautulli history rebuild failed, keeping the last good copy: {e}")
+        return c['movie'], c['show']
 
 
 def _refresh_watch_map(tau) -> tuple:
@@ -446,10 +450,10 @@ def _refresh_watch_map(tau) -> tuple:
     while True:
         rows = _rows(_history_page(tau, start, page))
         for r in rows:
-            rid = _play_key(r)
-            if rid in c['row_ids']:
+            key = _play_key(r)
+            if key in c['row_ids']:
                 continue
-            c['row_ids'].add(rid)
+            c['row_ids'].add(key)
             _add_play(c['movie'], c['show'], r)
             c['max_date'] = max(c['max_date'], int(r.get('date') or 0))
             added += 1
@@ -462,23 +466,22 @@ def _refresh_watch_map(tau) -> tuple:
     return c['movie'], c['show']
 
 
-def _rebuild_watch_map(tau, sig) -> tuple:
-    """Read the whole play log (pages fetched in parallel). Caller holds the lock."""
+def _read_watch_history(tau) -> Dict[str, Any]:
+    """Read and fold the whole play log (pages fetched in parallel). Touches no
+    shared state, so it can run without the lock. Raises on any failure."""
     from concurrent.futures import ThreadPoolExecutor
-    movie_watch: dict = {}
-    show_watch: dict = {}
-    try:
-        first = _history_page(tau, 0, _HISTORY_PAGE)
-    except Exception as e:
-        logger.warning(f"Tautulli get_history failed: {e}")
-        return movie_watch, show_watch
-    total = (first.get('recordsFiltered') or first.get('recordsTotal') or 0) if isinstance(first, dict) else 0
+    first = _history_page(tau, 0, _HISTORY_PAGE)
+    if not isinstance(first, dict):
+        raise RuntimeError("unexpected get_history response")
+    total = first.get('recordsFiltered') or first.get('recordsTotal') or 0
     pages = [_rows(first)]
     starts = list(range(_HISTORY_PAGE, min(total, 500000), _HISTORY_PAGE))
     if starts:
         with ThreadPoolExecutor(max_workers=4) as pool:
             pages += [_rows(p) for p in pool.map(lambda st: _history_page(tau, st, _HISTORY_PAGE), starts)]
 
+    movie_watch: dict = {}
+    show_watch: dict = {}
     row_ids, max_date = set(), 0
     for rows in pages:
         for r in rows:
@@ -488,10 +491,41 @@ def _rebuild_watch_map(tau, sig) -> tuple:
             row_ids.add(key)
             _add_play(movie_watch, show_watch, r)
             max_date = max(max_date, int(r.get('date') or 0))
-    _WATCH_CACHE.update(sig=sig, built=time.time(), movie=movie_watch, show=show_watch,
-                        row_ids=row_ids, max_date=max_date)
-    logger.info(f"Loaded Tautulli history: {len(row_ids)} plays, {len(movie_watch)} movie keys, {len(show_watch)} show keys")
-    return movie_watch, show_watch
+    if total and not row_ids:
+        raise RuntimeError("Tautulli reported plays but returned none")
+    return {'movie': movie_watch, 'show': show_watch, 'row_ids': row_ids, 'max_date': max_date}
+
+
+def _store_watch_map(sig, data: Dict[str, Any]) -> None:
+    """Swap in a freshly read history. Caller holds the lock."""
+    _WATCH_CACHE.update(sig=sig, built=time.time(), **data)
+    logger.info(f"Loaded Tautulli history: {len(data['row_ids'])} plays, "
+                f"{len(data['movie'])} movie keys, {len(data['show'])} show keys")
+
+
+_WATCH_REFRESH_SECONDS = 5 * 3600   # < _WATCH_FULL_REBUILD_SECONDS, so requests never pay for it
+
+
+def _watch_warmer() -> None:
+    """Background thread: read the history right after startup (requests arriving
+    meanwhile wait on the lock instead of starting a second read), then re-read it
+    every few hours *outside* the lock and swap it in, so a page load never waits
+    for a full read."""
+    try:
+        _load_watch_map(load_config())
+    except Exception as e:
+        logger.warning(f"Startup Tautulli history warm-up failed (will load on demand): {e}")
+    while True:
+        time.sleep(_WATCH_REFRESH_SECONDS)
+        try:
+            config = load_config()
+            tau = TautulliAPI(config['tautulli']['url'], config['tautulli']['api_key'])
+            sig = (config['tautulli'].get('url'), config['tautulli'].get('api_key'))
+            data = _read_watch_history(tau)
+            with _WATCH_LOCK:
+                _store_watch_map(sig, data)
+        except Exception as e:
+            logger.warning(f"Background Tautulli history refresh failed, keeping the last good copy: {e}")
 
 
 def watch_for(lib: str, title: str) -> Dict[str, Any]:
