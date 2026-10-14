@@ -44,7 +44,7 @@ function appData() {
         historyType: 'all',
         historyStatus: 'removed',
         historyExpanded: {},
-        dialog: { open: false, title: '', message: '', details: [], confirmLabel: 'Confirm', cancelLabel: 'Cancel', tone: 'primary' },
+        dialog: { open: false, title: '', message: '', details: [], list: [], listTitle: '', requireText: '', typed: '', confirmLabel: 'Confirm', cancelLabel: 'Cancel', tone: 'primary' },
         sortColumn: 'title',
         sortDirection: 'asc',
         toasts: [],
@@ -258,12 +258,18 @@ function appData() {
             }[item.readd_status] || '';
         },
         // Themed confirmation dialog. Resolves true/false.
-        askConfirm({ title, message = '', details = [], confirmLabel = 'Confirm', cancelLabel = 'Cancel', tone = 'primary' }) {
-            this.dialog = { open: true, title, message, details, confirmLabel, cancelLabel, tone };
-            this.$nextTick(() => this.$refs.dialogConfirm?.focus());
+        // `list` shows extra rows (e.g. the biggest items); `requireText` makes the
+        // user type it before the confirm button enables.
+        askConfirm({ title, message = '', details = [], list = [], listTitle = '', requireText = '', confirmLabel = 'Confirm', cancelLabel = 'Cancel', tone = 'primary' }) {
+            this.dialog = { open: true, title, message, details, list, listTitle, requireText, typed: '', confirmLabel, cancelLabel, tone };
+            this.$nextTick(() => (requireText ? this.$refs.dialogInput : this.$refs.dialogConfirm)?.focus());
             return new Promise(resolve => { this._dialogResolve = resolve; });
         },
+        dialogReady() {
+            return !this.dialog.requireText || this.dialog.typed.trim() === this.dialog.requireText;
+        },
         closeDialog(result) {
+            if (result && !this.dialogReady()) return;
             this.dialog.open = false;
             const resolve = this._dialogResolve;
             this._dialogResolve = null;
@@ -570,26 +576,6 @@ function appData() {
             ]);
         },
 
-        async toggleDryRun() {
-            this.config.safety.dry_run = !this.config.safety.dry_run;
-            try {
-                await fetch('/api/config', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ config: this.config }),
-                });
-                if (this.config.safety.dry_run) {
-                    this.showSuccess('Dry Run enabled — no files will be deleted');
-                } else {
-                    this.showWarning('⚠️ Dry Run disabled — executions will permanently delete files!', 8000);
-                }
-            } catch (error) {
-                // Revert on failure
-                this.config.safety.dry_run = !this.config.safety.dry_run;
-                this.showError('Failed to save dry run setting');
-            }
-        },
-
         async loadCandidates() {
             this.loading = true;
             this.loadingCandidates = true;
@@ -640,13 +626,23 @@ function appData() {
         async reviewRemoval() {
             const n = this.selectedCandidates.length;
             if (!n) return;
+            const bytes = this.selectedBytes();
             const dry = this.config?.safety?.dry_run;
+            // Big removals get a second look: the largest titles, and the count typed back.
+            const big = n > 25 || bytes > 500 * 1024 ** 3;
+            const selected = new Set(this.selectedCandidates);
+            const biggest = big ? (this.candidates || []).filter(c => selected.has(c.id))
+                .sort((a, b) => (b.file_size || 0) - (a.file_size || 0)).slice(0, 5)
+                .map(c => [c.title + (c.year && !String(c.title).includes(`(${c.year})`) ? ` (${c.year})` : ''), this.formatFileSize(c.file_size)]) : [];
             const ok = await this.askConfirm({
-                title: dry ? `Simulate removing ${n} item${n === 1 ? '' : 's'}?` : `Remove ${n} item${n === 1 ? '' : 's'}?`,
+                title: `${dry ? 'Simulate removing' : 'Remove'} ${n} item${n === 1 ? '' : 's'}?`,
                 message: dry
-                    ? 'Dry run is on: this only logs what would be removed. Nothing is deleted.'
+                    ? 'Dry run is set in config.yaml: this only logs what would be removed.'
                     : 'Deletes them from Radarr/Sonarr along with their files. Each one is recorded under Removed so it can be re-added.',
-                details: [['Items', String(n)], ['Size', this.formatFileSize(this.selectedBytes())], ['Mode', dry ? 'Dry run' : 'Live']],
+                details: [['Items', String(n)], ['Size', this.formatFileSize(bytes)]],
+                list: biggest,
+                listTitle: n > 5 ? 'Largest in this selection' : 'Selection',
+                requireText: big && !dry ? String(n) : '',
                 confirmLabel: dry ? 'Simulate' : `Remove ${n}`,
                 tone: dry ? 'primary' : 'danger',
             });

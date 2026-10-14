@@ -29,11 +29,31 @@
                         </template>
                     </dl>
                 </template>
+                <template x-if="dialog.list && dialog.list.length">
+                    <div class="mt-3">
+                        <div class="eyebrow mb-1.5" x-text="dialog.listTitle"></div>
+                        <ul class="rounded-lg border border-gray-200/70 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700/60 text-xs">
+                            <template x-for="row in dialog.list" :key="row[0]">
+                                <li class="flex justify-between gap-3 px-3 py-1.5">
+                                    <span class="truncate text-gray-800 dark:text-gray-200" x-text="row[0]"></span>
+                                    <span class="num text-gray-500 dark:text-gray-400 flex-shrink-0" x-text="row[1]"></span>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
+                </template>
+                <template x-if="dialog.requireText">
+                    <label class="block mt-4">
+                        <span class="text-sm text-gray-600 dark:text-gray-300">Type <strong class="num text-gray-900 dark:text-white" x-text="dialog.requireText"></strong> to confirm</span>
+                        <input type="text" inputmode="numeric" x-ref="dialogInput" x-model="dialog.typed"
+                               @keydown.enter.prevent="closeDialog(true)" class="input-field mt-1.5 num" autocomplete="off">
+                    </label>
+                </template>
             </div>
         </div>
         <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700">
             <button @click="closeDialog(false)" class="btn-secondary" x-text="dialog.cancelLabel"></button>
-            <button @click="closeDialog(true)" x-ref="dialogConfirm"
+            <button @click="closeDialog(true)" x-ref="dialogConfirm" :disabled="!dialogReady()"
                     :class="dialog.tone === 'danger' ? 'btn-danger' : 'btn-primary'" x-text="dialog.confirmLabel"></button>
         </div>
     </div>

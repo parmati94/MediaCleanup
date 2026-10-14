@@ -100,7 +100,8 @@ def get_default_config() -> Dict[str, Any]:
             'add_to_exclusion': False
         },
         'safety': {
-            'dry_run': True,
+            # Config-only (no UI toggle): when true, removals are logged, not performed.
+            'dry_run': False,
             'max_items_per_run': 200,
             'require_confirmation': True
         }

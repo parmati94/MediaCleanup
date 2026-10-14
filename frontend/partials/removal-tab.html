@@ -26,29 +26,17 @@
             </div>
         </div>
 
-        <!-- Status row: mode + active filters -->
+        <!-- Active filters -->
         <template x-if="config">
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 mb-5 rounded-lg border"
-                 :class="config.safety.dry_run ? 'border-amber-300/60 bg-amber-50/60 dark:border-amber-700/50 dark:bg-amber-900/10' : 'border-rose-300/60 bg-rose-50/60 dark:border-rose-800/60 dark:bg-rose-900/10'">
-                <div class="flex items-center gap-2.5">
-                    <button @click="toggleDryRun()" type="button" role="switch" :aria-checked="!config.safety.dry_run"
-                            class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
-                            :class="config.safety.dry_run ? 'bg-amber-400 focus:ring-amber-500' : 'bg-rose-500 focus:ring-rose-500'"
-                            :title="config.safety.dry_run ? 'Switch to live removals' : 'Switch to dry run'">
-                        <span class="inline-block h-4 w-4 mt-0.5 rounded-full bg-white shadow transition"
-                              :class="config.safety.dry_run ? 'translate-x-0.5' : 'translate-x-[18px]'"></span>
-                    </button>
-                    <span class="text-sm font-semibold" :class="config.safety.dry_run ? 'text-amber-800 dark:text-amber-300' : 'text-rose-700 dark:text-rose-300'"
-                          x-text="config.safety.dry_run ? 'Dry run — removals are simulated' : 'Live — removals delete files'"></span>
-                </div>
-                <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-500 dark:text-gray-400 sm:ml-auto">
-                    <span class="px-2 py-0.5 rounded-md bg-white/70 dark:bg-gray-800 text-xs font-medium text-gray-700 dark:text-gray-300"
-                          x-text="mediaType === 'both' ? 'Movies + TV' : (mediaType === 'movies' ? 'Movies' : 'TV')"></span>
-                    <span>not played in <span class="num" x-text="config.media.days_unwatched"></span>d</span>
-                    <span x-show="config.media.max_play_count === 1">&middot; never watched</span>
-                    <span x-show="config.media.max_play_count > 1">&middot; watched &lt; <span class="num" x-text="config.media.max_play_count"></span>&times;</span>
-                    <button @click="openFilters()" class="font-medium text-primary-600 dark:text-primary-400 hover:underline ml-1">Edit &rarr;</button>
-                </div>
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 mb-5 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200/70 dark:border-gray-800 text-sm text-gray-500 dark:text-gray-400">
+                <span class="eyebrow mr-1">Filters</span>
+                <span class="px-2 py-0.5 rounded-md bg-white dark:bg-gray-800 text-xs font-medium text-gray-700 dark:text-gray-300 ring-1 ring-gray-200 dark:ring-gray-700"
+                      x-text="mediaType === 'both' ? 'Movies + TV' : (mediaType === 'movies' ? 'Movies' : 'TV')"></span>
+                <span>not played in <span class="num" x-text="config.media.days_unwatched"></span>d</span>
+                <span x-show="config.media.max_play_count === 1">&middot; never watched</span>
+                <span x-show="config.media.max_play_count > 1">&middot; watched &lt; <span class="num" x-text="config.media.max_play_count"></span>&times;</span>
+                <span x-show="config.safety.dry_run" class="text-amber-600 dark:text-amber-400">&middot; dry run (config)</span>
+                <button @click="openFilters()" class="font-medium text-primary-600 dark:text-primary-400 hover:underline ml-auto">Edit filters &rarr;</button>
             </div>
         </template>
 
@@ -161,12 +149,11 @@
             </div>
             <button @click="selectedCandidates = []" class="text-sm font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">Clear</button>
             <button @click="reviewRemoval()" :disabled="loading"
-                    class="ml-auto"
-                    :class="config?.safety?.dry_run ? 'btn-secondary' : 'btn-danger'">
+                    class="ml-auto btn-danger">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                 </svg>
-                <span x-text="(config?.safety?.dry_run ? 'Simulate removal' : 'Remove') + ' (' + selectedCandidates.length + ')'"></span>
+                <span x-text="(config?.safety?.dry_run ? 'Simulate' : 'Remove') + ' (' + selectedCandidates.length + ')'"></span>
             </button>
         </div>
     </div>

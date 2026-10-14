@@ -33,12 +33,10 @@
                         </span>
                     </div>
                 </template>
-                <span x-show="config" x-cloak
-                      class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                      :class="config?.safety?.dry_run ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'"
-                      :title="config?.safety?.dry_run ? 'Dry run: removals are simulated' : 'Live: removals delete files'">
-                    <span class="w-1.5 h-1.5 rounded-full" :class="config?.safety?.dry_run ? 'bg-amber-500' : 'bg-rose-500 animate-pulse'"></span>
-                    <span x-text="config?.safety?.dry_run ? 'Dry run' : 'LIVE'"></span>
+                <span x-show="config?.safety?.dry_run" x-cloak
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                      title="safety.dry_run is set in config.yaml: removals are only simulated">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>Dry run
                 </span>
                 <svg x-show="loading" x-cloak class="animate-spin h-4 w-4 text-primary-500" fill="none" viewBox="0 0 24 24" aria-label="Loading">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>

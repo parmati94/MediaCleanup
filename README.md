@@ -33,9 +33,9 @@ MediaCleanup helps you reclaim disk space by identifying and removing unwatched 
 - Dry run mode indicator
 
 ### 🛡️ **Multiple Safety Layers**
-- **Dry Run Mode**: Test without actually removing files
+- **Confirmation**: every removal shows count and size; large ones (>25 items or >500 GB) list the biggest titles and require typing the count
+- **Undo**: every removal is recorded with its original release and can be re-added (see below)
 - **Selection Required**: Prevents accidental mass deletion
-- **Batch Warnings**: Confirms large operations (>10 items)
 - **Max Items Limit**: Backend enforcement of maximum items per run
 - **Toast Notifications**: Clear feedback for all operations
 
