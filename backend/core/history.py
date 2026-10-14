@@ -557,9 +557,10 @@ def _import_existing(rel, importable, import_files, file_payload) -> Optional[st
         return None
     try:
         candidates = importable(did)
-    except Exception:
+    except Exception as e:
         # Sonarr answers 500 for a download id its client doesn't have - that just
         # means the torrent is gone, which is the normal case.
+        logging.info(f"Import check for {did[:8]} found nothing usable: {_err(e)}")
         return None
     files = [f for f in candidates
              if (f.get('downloadId') or '').upper() == did and not f.get('rejections')]
@@ -569,25 +570,54 @@ def _import_existing(rel, importable, import_files, file_payload) -> Optional[st
     return f"{len(files)} file(s)"
 
 
-def _deliver(rel, push, search, grab, label, existing=None) -> Tuple[bool, str]:
+def _grab_confirmed(history_since, rel, since: str, wait: int = 15) -> bool:
+    """An approved push only means Radarr/Sonarr *tried*: if the download client
+    refuses it (e.g. the torrent is already there) they just log a warning. A real
+    grab writes a 'grabbed' history event - wait briefly for one."""
+    want_hash = (rel.get('info_hash') or '').upper()
+    want_title = _norm_title(rel.get('title'))
+    deadline = time.time() + wait
+    while True:
+        for ev in history_since(since):
+            if ev.get('eventType') != 'grabbed':
+                continue
+            if (want_hash and (ev.get('downloadId') or '').upper() == want_hash) or \
+                    _norm_title(ev.get('sourceTitle')) == want_title:
+                return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(2)
+
+
+def _deliver(rel, push, search, grab, label, existing=None, history_since=None) -> Tuple[bool, str]:
     """Import from the download client if the original is still there, else push,
     else search-and-match. Returns (delivered, log line)."""
     notes = []
+    imported = f"{label}: original torrent is still in the download client - imported it ({{}}, no download needed)"
     if existing:
         try:
             done = existing(rel)
             if done:
-                return True, f"{label}: original torrent is still in the download client - imported it ({done}, no download needed)"
+                return True, imported.format(done)
         except Exception as e:
             notes.append(f"import from download client failed: {_err(e)}")
     if rel.get('download_url') and not _reachable(rel['download_url']):
         notes.append("stored download link no longer reachable")
     elif rel.get('download_url') and rel.get('title'):
         try:
+            since = datetime.now().astimezone().isoformat()
             ok, why = _decision_ok(push(rel))
-            if ok:
+            if ok and (history_since is None or _grab_confirmed(history_since, rel, since)):
                 return True, f"{label}: sent original release to the download client ({rel['title']})"
-            notes.append(f"push rejected: {why}")
+            if ok:
+                notes.append("push approved but the download client didn't take it (already there?)")
+                # A refused duplicate means the torrent is in the client - try importing again.
+                if existing:
+                    done = existing(rel)
+                    if done:
+                        return True, imported.format(done)
+            else:
+                notes.append(f"push rejected: {why}")
         except Exception as e:
             notes.append(f"push failed: {_err(e)}")
     if rel.get('title') or rel.get('info_hash'):
@@ -626,6 +656,7 @@ def readd_movie(radarr, rec: Dict[str, Any]) -> Tuple[str, List[str], Optional[i
         })
         movie = radarr.add_movie(payload)
         log.append(f"Added to Radarr (id {movie['id']})")
+        _wait_for_refresh(radarr, 'RefreshMovie', movie['id'])
 
     mid = movie['id']
     extra = {'tmdbId': spec['tmdbId'], 'movieId': mid}
@@ -643,15 +674,34 @@ def readd_movie(radarr, rec: Dict[str, Any]) -> Tuple[str, List[str], Optional[i
                        'languages': f.get('languages') or [], 'releaseGroup': f.get('releaseGroup'),
                        'indexerFlags': f.get('indexerFlags') or 0})
 
+    def history_since(since):
+        return radarr._make_request('history/since', params={'date': since, 'eventType': 'grabbed'}) or []
+
     for rel in rec['releases']:
         ok, line = _deliver(rel, lambda r: radarr.push_release(_push_payload(r, extra)),
-                            search, radarr.grab_release, 'Movie', existing)
+                            search, radarr.grab_release, 'Movie', existing, history_since)
         log.append(line)
         if ok:
             return 'grabbed', log, mid
     radarr.search_movie(mid)
     log.append("Started Radarr's automatic search for the best available release")
     return 'searching', log, mid
+
+
+def _wait_for_refresh(client, command: str, item_id: int, timeout: int = 60) -> None:
+    """Adding an item kicks off a metadata refresh + disk scan; imports and release
+    matching against it misbehave until that has finished."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        busy = False
+        for cmd in client._make_request('command') or []:
+            body = cmd.get('body') or {}
+            ids = body.get('movieIds') or body.get('seriesIds') or [body.get('movieId'), body.get('seriesId')]
+            if cmd.get('name') == command and item_id in ids and cmd.get('status') in ('queued', 'started'):
+                busy = True
+        if not busy:
+            return
+        time.sleep(2)
 
 
 def _wait_for_episodes(sonarr, series_id: int, timeout: int = 90) -> None:
@@ -690,6 +740,7 @@ def readd_series(sonarr, rec: Dict[str, Any]) -> Tuple[str, List[str], Optional[
         })
         series = sonarr.add_series(payload)
         log.append(f"Added to Sonarr (id {series['id']})")
+        _wait_for_refresh(sonarr, 'RefreshSeries', series['id'])
         _wait_for_episodes(sonarr, series['id'])
 
     sid = series['id']
@@ -711,6 +762,9 @@ def readd_series(sonarr, rec: Dict[str, Any]) -> Tuple[str, List[str], Optional[
                        'languages': f.get('languages') or [], 'releaseGroup': f.get('releaseGroup'),
                        'releaseType': f.get('releaseType'), 'indexerFlags': f.get('indexerFlags') or 0})
 
+    def history_since(since):
+        return sonarr._make_request('history/since', params={'date': since, 'eventType': 'grabbed'}) or []
+
     covered, missed = set(), set()
     for rel in rec['releases']:
         seasons = rel.get('seasons') or []
@@ -718,7 +772,7 @@ def readd_series(sonarr, rec: Dict[str, Any]) -> Tuple[str, List[str], Optional[
         first = seasons[0] if seasons else None
         ok, line = _deliver(rel, lambda r: sonarr.push_release(_push_payload(r, extra)),
                             searcher(first) if first is not None else (lambda: []),
-                            sonarr.grab_release, label, existing)
+                            sonarr.grab_release, label, existing, history_since)
         log.append(line)
         (covered if ok else missed).update(seasons)
 
