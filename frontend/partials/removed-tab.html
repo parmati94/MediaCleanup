@@ -19,19 +19,33 @@
 
         <template x-if="history">
             <div>
-                <!-- Totals -->
+                <!-- Status toggle -->
+                <div class="flex border-b border-gray-200 dark:border-gray-700 mb-5 overflow-x-auto whitespace-nowrap">
+                    <template x-for="opt in [['removed','Removed'],['readding','Re-adding'],['restored','Restored'],['all','All']]" :key="opt[0]">
+                        <button @click="historyStatus = opt[0]"
+                                class="px-3 py-2 -mb-px border-b-2 text-sm font-medium transition inline-flex items-center gap-2"
+                                :class="historyStatus === opt[0] ? 'border-primary-600 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'">
+                            <span x-text="opt[1]"></span>
+                            <span class="num text-xs px-1.5 rounded-full"
+                                  :class="historyStatus === opt[0] ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'"
+                                  x-text="statusCount(opt[0])"></span>
+                        </button>
+                    </template>
+                </div>
+
+                <!-- Totals (for the selected status) -->
                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
                     <div class="stat-tile">
-                        <div class="eyebrow">Items removed</div>
+                        <div class="eyebrow" x-text="historyTotals().itemsLabel"></div>
                         <div class="num text-2xl font-semibold mt-1" x-text="historyTotals().items"></div>
                     </div>
                     <div class="stat-tile">
-                        <div class="eyebrow">Space freed</div>
+                        <div class="eyebrow" x-text="historyTotals().bytesLabel"></div>
                         <div class="num text-2xl font-semibold mt-1" x-text="formatFileSize(historyTotals().bytes)"></div>
                     </div>
                     <div class="stat-tile hidden sm:block">
                         <div class="eyebrow">Batches</div>
-                        <div class="num text-2xl font-semibold mt-1" x-text="historyBatches.length"></div>
+                        <div class="num text-2xl font-semibold mt-1" x-text="historyTotals().batches"></div>
                     </div>
                 </div>
 
@@ -51,7 +65,8 @@
                     <p class="text-center py-12 text-gray-500 dark:text-gray-400">Nothing has been removed yet. Removals made from the Removal tab are recorded here automatically.</p>
                 </template>
                 <template x-if="history.length > 0 && historyGroups().length === 0">
-                    <p class="text-center py-12 text-gray-500 dark:text-gray-400">No removed items match.</p>
+                    <p class="text-center py-12 text-gray-500 dark:text-gray-400"
+                       x-text="historyQuery.trim() ? 'No items match your search.' : {removed: 'Everything removed has been re-added.', readding: 'Nothing is being re-added right now.', restored: 'Nothing has been restored yet.', all: 'No items.'}[historyStatus]"></p>
                 </template>
 
                 <!-- Batches -->
@@ -98,7 +113,7 @@
                                                 </template>
                                                 <template x-if="item.readd_status && item.readd_status !== 'failed'">
                                                     <span class="text-xs font-medium px-2 py-1 rounded-md"
-                                                          :class="item.readd_status === 'running' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : (item.readd_status === 'grabbed' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200')"
+                                                          :class="item.readd_status === 'restored' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' : (item.readd_status === 'searching' || item.readd_status === 'partial' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200' : 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300')"
                                                           x-text="readdLabel(item)"></span>
                                                 </template>
                                             </div>

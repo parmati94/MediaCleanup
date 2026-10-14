@@ -18,7 +18,7 @@ import yaml
 
 from backend.core.analyzer import LibraryAnalyzer
 from backend.core.media_remover import MediaRemover
-from backend.core.history import HistoryStore, start_readd
+from backend.core.history import HistoryStore, start_readd, refresh_in_flight, IN_FLIGHT
 from backend.api.tautulli import TautulliAPI
 from backend.api.radarr import RadarrAPI
 from backend.api.sonarr import SonarrAPI
@@ -705,7 +705,16 @@ def list_history():
     """Everything MediaCleanup has removed, grouped into batches (no secrets)."""
     try:
         store = get_history()
-        return {"success": True, "data": {"removals": store.list_removals(), "batches": store.list_batches()}}
+        removals = store.list_removals()
+        if any(r.get('readd_status') in IN_FLIGHT for r in removals):
+            config = load_config()
+            radarr = sonarr = None
+            if config.get('radarr', {}).get('enabled'):
+                radarr = RadarrAPI(config['radarr']['url'], config['radarr']['api_key'])
+            if config.get('sonarr', {}).get('enabled'):
+                sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key'])
+            refresh_in_flight(store, removals, radarr, sonarr)
+        return {"success": True, "data": {"removals": removals, "batches": store.list_batches()}}
     except Exception as e:
         logger.error(f"Error reading removal history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -741,7 +750,7 @@ def readd_status(removal_id: int):
     if not rec:
         raise HTTPException(status_code=404, detail="Not found")
     return {"success": True, "data": {k: rec.get(k) for k in
-                                      ('id', 'readd_status', 'readd_detail', 'readd_at', 'new_arr_id')}}
+                                      ('id', 'readd_status', 'readd_detail', 'readd_at', 'new_arr_id', 'restored_at')}}
 
 
 @app.post("/api/history/{removal_id}/readd")

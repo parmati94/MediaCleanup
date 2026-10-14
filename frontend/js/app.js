@@ -41,6 +41,7 @@ function appData() {
         historyLoading: false,
         historyQuery: '',
         historyType: 'all',
+        historyStatus: 'removed',
         historyExpanded: {},
         dialog: { open: false, title: '', message: '', details: [], confirmLabel: 'Confirm', cancelLabel: 'Cancel', tone: 'primary' },
         sortColumn: 'title',
@@ -147,6 +148,7 @@ function appData() {
                     this.historyBatches = data.data.batches;
                     // Resume polling for anything still re-adding (e.g. after a reload).
                     this.history.filter(r => r.readd_status === 'running').forEach(r => this.pollReadd(r));
+                    this.scheduleHistoryRefresh();
                 }
             } catch (error) {
                 console.error('Error loading history:', error);
@@ -155,10 +157,33 @@ function appData() {
                 this.historyLoading = false;
             }
         },
+        // While re-adds are downloading, refresh every 30s so progress / "Restored"
+        // shows up on its own. Stops once nothing is in flight or the tab is left.
+        scheduleHistoryRefresh() {
+            clearTimeout(this._historyTimer);
+            const inFlight = (this.history || []).some(r => ['grabbed', 'searching', 'partial'].includes(r.readd_status));
+            if (!inFlight) return;
+            this._historyTimer = setTimeout(() => {
+                if (this.currentTab === 'removed' && !document.hidden) this.loadHistory();
+                else this.scheduleHistoryRefresh();
+            }, 30000);
+        },
+        // 'removed' (still gone, incl. failed re-adds) | 'readding' (in flight) | 'restored'
+        itemStatus(r) {
+            if (r.readd_status === 'restored') return 'restored';
+            if (['running', 'grabbed', 'searching', 'partial'].includes(r.readd_status)) return 'readding';
+            return 'removed';
+        },
+        statusCount(status) {
+            return (this.history || []).filter(r =>
+                (status === 'all' || this.itemStatus(r) === status) &&
+                (this.historyType === 'all' || r.media_type === this.historyType)).length;
+        },
         filteredHistory() {
             if (!this.history) return [];
             const q = this.historyQuery.trim().toLowerCase();
             return this.history.filter(r =>
+                (this.historyStatus === 'all' || this.itemStatus(r) === this.historyStatus) &&
                 (this.historyType === 'all' || r.media_type === this.historyType) &&
                 (!q || r.title.toLowerCase().includes(q) || String(r.year || '').includes(q) ||
                     r.releases.some(x => (x.title || '').toLowerCase().includes(q) || (x.indexer || '').toLowerCase().includes(q))));
@@ -171,9 +196,19 @@ function appData() {
                 .filter(b => byBatch[b.id])
                 .map(b => ({ ...b, rows: byBatch[b.id], shown_bytes: byBatch[b.id].reduce((t, r) => t + (r.size_bytes || 0), 0) }));
         },
+        // Totals for the selected status + type (not the search box).
         historyTotals() {
-            const rows = this.history || [];
-            return { items: rows.length, bytes: rows.reduce((t, r) => t + (r.size_bytes || 0), 0) };
+            const rows = (this.history || []).filter(r =>
+                (this.historyStatus === 'all' || this.itemStatus(r) === this.historyStatus) &&
+                (this.historyType === 'all' || r.media_type === this.historyType));
+            const labels = {
+                removed: ['Items removed', 'Space freed'], readding: ['Re-adding', 'Size'],
+                restored: ['Restored', 'Size'], all: ['Items', 'Total size'],
+            }[this.historyStatus];
+            return {
+                items: rows.length, bytes: rows.reduce((t, r) => t + (r.size_bytes || 0), 0),
+                batches: new Set(rows.map(r => r.batch_id)).size, itemsLabel: labels[0], bytesLabel: labels[1],
+            };
         },
         toggleHistoryRow(id) {
             this.historyExpanded[id] = !this.historyExpanded[id];
@@ -197,9 +232,10 @@ function appData() {
             return Object.entries(groups).map(([label, releases]) => ({ label, releases }));
         },
         readdLabel(item) {
-            return {
-                running: 'Re-adding…', grabbed: 'Re-added', partial: 'Partly re-added',
-                searching: 'Re-added (searching)', failed: 'Re-add failed',
+            if (item.readd_status === 'restored') return 'Restored ' + new Date(item.restored_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            if (item.readd_status === 'running') return 'Re-adding…';
+            return item.readd_progress || {
+                grabbed: 'Waiting for download', partial: 'Partly re-added', searching: 'Searching for a release',
             }[item.readd_status] || '';
         },
         // Themed confirmation dialog. Resolves true/false.
@@ -238,6 +274,7 @@ function appData() {
                 item.readd_status = 'running';
                 item.readd_detail = 'Re-adding...';
                 this.historyExpanded[item.id] = true;
+                this.showSuccess(`Re-adding ${item.title} - follow it under Re-adding`);
                 this.pollReadd(item);
             } catch (error) {
                 this.showError(`Re-add failed: ${error.message}`);
@@ -253,6 +290,7 @@ function appData() {
                 } catch (error) { continue; }
                 if (item.readd_status !== 'running') break;
             }
+            this.scheduleHistoryRefresh();
             if (item.readd_status === 'failed') this.showError(`Re-add of ${item.title} failed`);
             else if (item.readd_status === 'grabbed') this.showSuccess(`${item.title}: original release sent to the download client`);
             else this.showWarning(`${item.title}: re-added, ${item.readd_status === 'partial' ? 'some seasons' : 'release'} being searched for`);

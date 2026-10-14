@@ -53,10 +53,11 @@ CREATE TABLE IF NOT EXISTS removals (
     play_count   INTEGER,
     readd_json   TEXT,                   -- spec to recreate the item in Radarr/Sonarr
     capture_note TEXT,                   -- set when capture was incomplete
-    readd_status TEXT,                   -- NULL | running | grabbed | searching | failed
+    readd_status TEXT,                   -- NULL | running | grabbed | searching | partial | failed | restored
     readd_detail TEXT,
     readd_at     TEXT,
-    new_arr_id   INTEGER
+    new_arr_id   INTEGER,
+    restored_at  TEXT                    -- when the re-added item had files in the library again
 );
 CREATE TABLE IF NOT EXISTS releases (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,6 +104,9 @@ class HistoryStore:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA)
+            cols = {r[1] for r in c.execute("PRAGMA table_info(removals)")}
+            if 'restored_at' not in cols:
+                c.execute("ALTER TABLE removals ADD COLUMN restored_at TEXT")
 
     @contextmanager
     def _conn(self):
@@ -158,6 +162,10 @@ class HistoryStore:
         """Drop a pending record whose delete failed (the item is still in the library)."""
         with self._conn() as c:
             c.execute("DELETE FROM removals WHERE id=? AND status='pending'", (removal_id,))
+
+    def mark_restored(self, removal_id: int) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE removals SET readd_status='restored', restored_at=? WHERE id=?", (now_iso(), removal_id))
 
     def set_readd(self, removal_id: int, status: str, detail: str, new_arr_id: Optional[int] = None) -> None:
         with self._conn() as c:
@@ -380,6 +388,60 @@ def capture_series(sonarr, series_id: int) -> Dict[str, Any]:
 def minimal_record(media_type: str, arr_id: int, error: Exception) -> Dict[str, Any]:
     return {'media_type': media_type, 'arr_id': arr_id, 'title': f'{media_type} #{arr_id}',
             'capture_note': f'capture failed: {error}', 'readd': {}, 'releases': []}
+
+
+IN_FLIGHT = ('grabbed', 'searching', 'partial')
+
+
+def _queue_progress(records: List[Dict[str, Any]]) -> Optional[str]:
+    """One-line summary of Radarr/Sonarr queue entries for an item."""
+    if not records:
+        return None
+    states = {r.get('trackedDownloadState') for r in records}
+    if states & {'importPending', 'importing'}:
+        return 'Importing' if len(records) == 1 else f'Importing ({len(records)} downloads)'
+    if 'importBlocked' in states or 'failedPending' in states:
+        return 'Needs attention in ' + ('Radarr' if 'movieId' in records[0] else 'Sonarr')
+    size = sum(r.get('size') or 0 for r in records)
+    left = sum(r.get('sizeleft') or 0 for r in records)
+    pct = int(100 * (size - left) / size) if size else 0
+    return f"Downloading {pct}%" + (f" ({len(records)} downloads)" if len(records) > 1 else '')
+
+
+def refresh_in_flight(store: HistoryStore, rows: List[Dict[str, Any]], radarr, sonarr) -> None:
+    """For re-adds still waiting on a download, ask Radarr/Sonarr how it's going:
+    mark the item restored once it has files and nothing left in the queue, else
+    attach a progress line. Touches only in-flight items (usually none), and a
+    restored item is never checked again."""
+    for row in rows:
+        if row.get('readd_status') not in IN_FLIGHT or not row.get('new_arr_id'):
+            continue
+        aid = row['new_arr_id']
+        try:
+            if row['media_type'] == 'movie' and radarr:
+                item = radarr.get_movie(aid)
+                queue = radarr._make_request('queue', params={'movieIds': aid, 'pageSize': 50})
+                has_files = bool(item.get('hasFile'))
+            elif row['media_type'] == 'show' and sonarr:
+                item = sonarr.get_series_by_id(aid)
+                queue = sonarr._make_request('queue', params={'seriesIds': aid, 'pageSize': 500})
+                has_files = (item.get('statistics') or {}).get('episodeFileCount', 0) > 0
+            else:
+                continue
+            records = (queue or {}).get('records') or []
+            if has_files and not records:
+                store.mark_restored(row['id'])
+                row['readd_status'] = 'restored'
+                row['restored_at'] = now_iso()
+            else:
+                row['readd_progress'] = _queue_progress(records) or (
+                    'Searching for a release' if row['readd_status'] == 'searching' else 'Waiting for download')
+        except Exception as e:
+            resp = getattr(e, 'response', None)
+            if resp is not None and resp.status_code == 404:
+                row['readd_progress'] = 'No longer in ' + ('Radarr' if row['media_type'] == 'movie' else 'Sonarr')
+            else:
+                logging.warning(f"Could not check re-add progress for '{row.get('title')}': {e}")
 
 
 # ---------------------------------------------------------------------------
