@@ -445,10 +445,10 @@ def _reachable(url: str) -> bool:
     Jackett instance.) Only a TCP connect - the URL itself is never fetched here."""
     import socket
     from urllib.parse import urlparse
-    u = urlparse(url)
     try:
+        u = urlparse(url)
         port = u.port or (443 if u.scheme == 'https' else 80)
-        with socket.create_connection((u.hostname, port), timeout=5):
+        with socket.create_connection((u.hostname, port), timeout=3):
             return True
     except (OSError, ValueError):
         return False
