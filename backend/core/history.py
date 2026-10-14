@@ -473,16 +473,46 @@ def _err(e: Exception) -> str:
     return str(e)
 
 
+def _norm_title(t: str) -> str:
+    """Release names differ cosmetically between indexer proxies / trackers
+    ('Movie.2018.1080p' vs 'Movie 2018 1080p'): compare on alphanumerics only."""
+    import re
+    return re.sub(r'[^a-z0-9]+', ' ', (t or '').lower()).strip()
+
+
+def _indexer_base(name: Optional[str]) -> str:
+    """'Aither (Prowlarr)' and 'Aither' are the same tracker."""
+    return _norm_title((name or '').replace('(Prowlarr)', ''))
+
+
 def _match_result(results: List[Dict[str, Any]], rel: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Pick the search result that is the original release.
+
+    1. Same info hash - exact torrent (most indexers don't return hashes in search).
+    2. Same release name (ignoring punctuation/case) AND, when both sizes are known,
+       size within 1% - the same release; this guards against an identically named
+       but different upload. Among matches, prefer the original tracker.
+    No fuzzy matching: if nothing qualifies, the caller falls back to a normal search.
+    """
     want_hash = (rel.get('info_hash') or '').lower()
-    want_title = (rel.get('title') or '').lower()
-    for r in results:
-        if want_hash and (r.get('infoHash') or '').lower() == want_hash:
-            return r
-    for r in results:
-        if want_title and (r.get('title') or '').lower() == want_title:
-            return r
-    return None
+    if want_hash:
+        for r in results:
+            if (r.get('infoHash') or '').lower() == want_hash:
+                return r
+    want_title = _norm_title(rel.get('title'))
+    if not want_title:
+        return None
+    want_size = rel.get('size_bytes') or 0
+    want_indexer = _indexer_base(rel.get('indexer'))
+
+    def size_ok(r):
+        size = r.get('size') or 0
+        return not (want_size and size) or abs(size - want_size) <= 0.01 * want_size
+
+    hits = [r for r in results if _norm_title(r.get('title')) == want_title and size_ok(r)]
+    hits.sort(key=lambda r: (_indexer_base(r.get('indexer')) != want_indexer,
+                             abs((r.get('size') or 0) - want_size)))
+    return hits[0] if hits else None
 
 
 def _push_payload(rel: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
