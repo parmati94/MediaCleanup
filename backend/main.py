@@ -818,6 +818,58 @@ async def get_removal_candidates():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# One removal at a time, run in a background thread so the UI can show progress
+# (a few hundred items, each captured then deleted, can take a couple of minutes).
+_REMOVAL_LOCK = threading.Lock()
+_REMOVAL_JOB: Dict[str, Any] = {}
+
+
+def _start_removal_job(remover: MediaRemover, ids: List[str]) -> Optional[str]:
+    with _REMOVAL_LOCK:
+        if _REMOVAL_JOB.get('running'):
+            return None
+        job_id = f"{int(time.time() * 1000):x}"
+        _REMOVAL_JOB.clear()
+        _REMOVAL_JOB.update(id=job_id, running=True, total=len(ids), done=0, current=None,
+                            failed=[], success=None, dry_run=bool(remover.config.get('safety', {}).get('dry_run')),
+                            started=time.time(), finished=None)
+
+    def progress(handle: str, ok: Optional[bool]) -> None:
+        with _REMOVAL_LOCK:
+            if ok is None:
+                _REMOVAL_JOB['current'] = handle
+            else:
+                _REMOVAL_JOB['done'] += 1
+                if not ok:
+                    _REMOVAL_JOB['failed'].append(handle)
+
+    def run() -> None:
+        success = False
+        try:
+            try:
+                history = get_history()
+            except Exception as e:
+                logger.error(f"Removal history unavailable, continuing without it: {e}")
+                history = None
+            success = remover.remove_by_ids(ids, history=history, watch=watch_for, progress=progress)
+        except Exception as e:
+            logger.error(f"Removal job failed: {e}", exc_info=True)
+        finally:
+            _CATALOG_CACHE['items'] = None   # the preview must not show what was just removed
+            with _REMOVAL_LOCK:
+                _REMOVAL_JOB.update(running=False, current=None, success=success, finished=time.time())
+
+    threading.Thread(target=run, name=f"removal-{job_id}", daemon=True).start()
+    return job_id
+
+
+@app.get("/api/remove/status")
+def removal_status():
+    """Progress of the current (or last) removal job."""
+    with _REMOVAL_LOCK:
+        return {"success": True, "data": dict(_REMOVAL_JOB, failed=list(_REMOVAL_JOB.get('failed', [])))}
+
+
 @app.post("/api/remove")
 async def remove_media(request: RemovalRequest):
     """Execute media removal (by Radarr/Sonarr id, with legacy rating_key support)."""
@@ -853,16 +905,13 @@ async def remove_media(request: RemovalRequest):
 
         remover = MediaRemover(config)
         if use_ids:
-            try:
-                history = get_history()
-            except Exception as e:
-                logger.error(f"Removal history unavailable, continuing without it: {e}")
-                history = None
-            success = remover.remove_by_ids(request.ids, history=history, watch=watch_for)
-            _CATALOG_CACHE['items'] = None   # the preview must not show what was just removed
-        else:
-            success = remover.remove_by_rating_keys(request.rating_keys)
+            # Runs in the background; the UI follows it via /api/remove/status.
+            job = _start_removal_job(remover, request.ids)
+            if job is None:
+                raise HTTPException(status_code=409, detail="A removal is already running")
+            return {"success": True, "job": job}
 
+        success = remover.remove_by_rating_keys(request.rating_keys)
         return {
             "success": success,
             "message": "Removal process completed" if success else "Removal process failed"

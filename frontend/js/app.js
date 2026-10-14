@@ -33,6 +33,8 @@ function appData() {
         searchQuery: '',
         selectedCandidates: [],
         selectionOpen: false,
+        removalJob: null,
+        removalTitles: {},
         loadingCandidates: false,
         analysisAt: null,
         candidatesAt: null,
@@ -136,6 +138,10 @@ function appData() {
             // Cheap checks that keep the dashboard honest on every visit.
             this.testAllConnections();
             this.loadHistorySummary();
+            // Pick a removal back up if the page was reloaded while one was running.
+            fetch('/api/remove/status').then(r => r.json()).then(d => {
+                if (d.data?.running) { this.removalJob = d.data; this.followRemoval(); }
+            }).catch(() => {});
 
             // Only auto-run the analysis if we have nothing cached; otherwise the
             // restored data stands until the user hits Refresh.
@@ -657,12 +663,26 @@ function appData() {
             });
             if (ok) await this.executeRemoval();
         },
+        // Max items per removal (Settings → Safety). Enforced while selecting, not
+        // just by the backend at the end.
+        selectionLimit() {
+            return Number(this.config?.safety?.max_items_per_run) || Infinity;
+        },
+        atSelectionLimit() {
+            return this.selectedCandidates.length >= this.selectionLimit();
+        },
+        _limitNotice() {
+            this.showWarning(`One removal can include up to ${this.selectionLimit()} items (Settings → Safety → max items per run).`, 6000);
+        },
         toggleSelectAll() {
             const filtered = this.filteredCandidates();
-            if (this.selectedCandidates.length === filtered.length) {
+            const limit = this.selectionLimit();
+            if (this.selectedCandidates.length && this.selectedCandidates.length >= Math.min(filtered.length, limit)) {
                 this.selectedCandidates = [];
             } else {
-                this.selectedCandidates = filtered.map(c => c.id);
+                // Takes the first N in the current sort order (sort by size for the biggest N).
+                this.selectedCandidates = filtered.slice(0, limit).map(c => c.id);
+                if (filtered.length > limit) this._limitNotice();
             }
         },
         
@@ -673,6 +693,7 @@ function appData() {
         toggleSelection(ratingKey) {
             const index = this.selectedCandidates.indexOf(ratingKey);
             if (index === -1) {
+                if (this.atSelectionLimit()) return this._limitNotice();
                 this.selectedCandidates.push(ratingKey);
             } else {
                 this.selectedCandidates.splice(index, 1);
@@ -766,44 +787,59 @@ function appData() {
                 this.showError('Please select at least one item to remove. Use checkboxes to select items.');
                 return;
             }
-            
-            const itemsToRemove = this.selectedCandidates;
-            
-
-            this.loading = true;
+            const ids = [...this.selectedCandidates];
+            // Titles for the progress panel (the candidate list refreshes underneath it).
+            const items = this.candidateStats().items;
+            this.removalTitles = Object.fromEntries(ids.map(id => [id, items.get(id) ? this.titleWithYear(items.get(id)) : id]));
             try {
                 const response = await fetch('/api/remove', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        confirm: true,
-                        ids: itemsToRemove
-                    }),
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true, ids }),
                 });
                 const data = await response.json();
-                if (data.success) {
-                    const isDryRun = this.config?.safety?.dry_run;
-                    if (isDryRun) {
-                        this.showWarning(`DRY RUN: ${itemsToRemove.length} item(s) would have been removed (no files were actually deleted)`);
-                    } else {
-                        this.showSuccess(`Successfully removed ${itemsToRemove.length} item(s)`);
-                    }
-                    this.selectedCandidates = [];
-                    // Refresh data
-                    if (this.history) this.loadHistory(); else this.loadHistorySummary();
-                    await this.runAnalysis(false);
-                    await this.loadCandidates();
-                } else {
-                    this.showError('Removal process failed');
+                if (!response.ok) {
+                    // e.g. over max items per run, or another removal running
+                    this.showError(data.detail || 'Removal was refused');
+                    return;
                 }
+                this.selectedCandidates = [];
+                this.followRemoval();
             } catch (error) {
-                console.error('Error executing removal:', error);
-                this.showError('Failed to execute removal');
-            } finally {
-                this.loading = false;
+                console.error('Error starting removal:', error);
+                this.showError('Failed to start removal');
             }
+        },
+
+        // Poll the background removal job until it finishes, then refresh everything.
+        async followRemoval() {
+            if (this._followingRemoval) return;
+            this._followingRemoval = true;
+            try {
+                for (;;) {
+                    try {
+                        const data = await (await fetch('/api/remove/status')).json();
+                        this.removalJob = data.data;
+                    } catch (e) { /* transient - keep polling */ }
+                    if (!this.removalJob?.running) break;
+                    await new Promise(r => setTimeout(r, 700));
+                }
+                const job = this.removalJob || {};
+                const ok = (job.done || 0) - (job.failed?.length || 0);
+                if (job.dry_run) this.showWarning(`Dry run: ${ok} item(s) would have been removed`);
+                else if (job.failed?.length) this.showError(`Removed ${ok} of ${job.total}. ${job.failed.length} failed - see the container log.`);
+                else this.showSuccess(`Removed ${ok} item(s)`);
+                if (this.history) this.loadHistory(); else this.loadHistorySummary();
+                this.runAnalysis(false);
+                await this.loadCandidates();
+                // Leave the finished summary up briefly before the panel goes away.
+                setTimeout(() => { if (!this.removalJob?.running) this.removalJob = null; }, 4000);
+            } finally {
+                this._followingRemoval = false;
+            }
+        },
+        removalLabel(handle) {
+            return (this.removalTitles || {})[handle] || handle || '';
         },
 
         getTotalUnwatched() {

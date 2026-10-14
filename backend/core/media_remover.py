@@ -204,7 +204,7 @@ class MediaRemover:
             logging.error(f"Error during selective removal process: {e}")
             return False
 
-    def remove_by_ids(self, ids: List[str], history=None, watch=None) -> bool:
+    def remove_by_ids(self, ids: List[str], history=None, watch=None, progress=None) -> bool:
         """Remove specific items by 'type:arr_id' handles (e.g. 'movie:123', 'show:45').
 
         Deletes directly via Radarr/Sonarr by id - no Tautulli lookup or fuzzy title
@@ -214,7 +214,8 @@ class MediaRemover:
         With a HistoryStore, each item is snapshotted (metadata, re-add spec and the
         on-disk release with its tracker links) BEFORE the delete - Radarr/Sonarr drop
         an item's history when it is deleted. `watch(lib, title)` returns watch
-        data (last_played/play_count) to record why it went.
+        data (last_played/play_count) to record why it went. `progress(handle, ok)`
+        is called with ok=None when an item starts and True/False when it's done.
         """
         logging.info(f"Starting selective removal of {len(ids)} items by id...")
 
@@ -256,23 +257,21 @@ class MediaRemover:
             except Exception as e:
                 logging.error(f"Could not update removal history record {record_id}: {e}")
 
-        success_count = 0
-        for handle in ids:
+        def remove_one(handle) -> bool:
             try:
                 lib, _, raw = str(handle).partition(':')
                 arr_id = int(raw)
             except (ValueError, TypeError):
                 logging.warning(f"Skipping malformed removal id: {handle!r}")
-                continue
+                return False
 
             if lib == 'movie':
                 if not (self.radarr and self.config.get('radarr', {}).get('enabled')):
                     logging.warning(f"Cannot remove movie id {arr_id} - Radarr is disabled")
-                    continue
+                    return False
                 if dry_run:
                     logging.info(f"Would remove movie (Radarr id {arr_id})")
-                    success_count += 1
-                    continue
+                    return True
                 record_id = capture('movie', arr_id)
                 removed = self.radarr.delete_movie(arr_id,
                                                    delete_files=self.config['radarr']['delete_files'],
@@ -280,18 +279,17 @@ class MediaRemover:
                 settle(record_id, removed)
                 if removed:
                     logging.info(f"Removed movie from Radarr (id {arr_id})")
-                    success_count += 1
                 else:
                     logging.warning(f"Failed to remove movie from Radarr (id {arr_id})")
+                return removed
 
-            elif lib == 'show':
+            if lib == 'show':
                 if not (self.sonarr and self.config.get('sonarr', {}).get('enabled')):
                     logging.warning(f"Cannot remove show id {arr_id} - Sonarr is disabled")
-                    continue
+                    return False
                 if dry_run:
                     logging.info(f"Would remove series (Sonarr id {arr_id})")
-                    success_count += 1
-                    continue
+                    return True
                 record_id = capture('show', arr_id)
                 removed = self.sonarr.delete_series(arr_id,
                                                     delete_files=self.config['sonarr']['delete_files'],
@@ -299,11 +297,25 @@ class MediaRemover:
                 settle(record_id, removed)
                 if removed:
                     logging.info(f"Removed series from Sonarr (id {arr_id})")
-                    success_count += 1
                 else:
                     logging.warning(f"Failed to remove series from Sonarr (id {arr_id})")
-            else:
-                logging.warning(f"Unknown media type in removal id: {handle!r}")
+                return removed
+
+            logging.warning(f"Unknown media type in removal id: {handle!r}")
+            return False
+
+        success_count = 0
+        for handle in ids:
+            if progress:
+                progress(handle, None)
+            try:
+                ok = bool(remove_one(handle))
+            except Exception as e:
+                logging.error(f"Error removing {handle}: {e}")
+                ok = False
+            success_count += ok
+            if progress:
+                progress(handle, ok)
 
         logging.info(f"Removal by id completed. {success_count}/{len(ids)} processed")
         return success_count == len(ids)
