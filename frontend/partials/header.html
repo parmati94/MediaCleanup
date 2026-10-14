@@ -1,46 +1,74 @@
-<header class="bg-white dark:bg-gray-800 shadow-md">
-    <div class="container mx-auto px-4 py-6">
-        <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <div class="relative flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-400/90 via-primary-600/90 to-primary-700/90 text-white shadow-lg shadow-primary-600/25 ring-1 ring-inset ring-white/20">
-                    <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<header class="sticky top-0 z-40 bg-white/90 dark:bg-gray-900/90 backdrop-blur border-b border-gray-200/80 dark:border-gray-800">
+    <div class="container mx-auto px-4">
+        <div class="flex items-center gap-6 h-16">
+            <!-- Brand -->
+            <div class="flex items-center gap-2.5 flex-shrink-0">
+                <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-primary-400 via-primary-600 to-primary-700 text-white shadow-md shadow-primary-600/25 ring-1 ring-inset ring-white/20">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"></path>
                     </svg>
                 </div>
-                <div>
-                    <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Media Cleanup</h1>
-                    <p class="text-gray-600 dark:text-gray-400 mt-1">Manage unwatched media removal</p>
-                </div>
+                <span class="text-lg font-bold tracking-tight text-gray-900 dark:text-white">Media Cleanup</span>
             </div>
-            <div class="flex items-center space-x-4">
-                <span x-show="loading" class="text-sm text-gray-600 dark:text-gray-400 flex items-center">
-                    <svg class="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Loading...
+
+            <!-- Tabs (desktop) -->
+            <nav class="hidden md:flex items-center gap-1">
+                <template x-for="t in tabs" :key="t[0]">
+                    <button @click="currentTab = t[0]"
+                            class="px-3 py-1.5 rounded-md text-sm font-medium transition"
+                            :class="currentTab === t[0] ? 'bg-primary-600/10 text-primary-700 dark:text-primary-300' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-800'"
+                            x-text="t[1]"></button>
+                </template>
+            </nav>
+
+            <div class="flex items-center gap-3 ml-auto">
+                <!-- Live library chips -->
+                <template x-if="analysis?.current_config_impact">
+                    <div class="hidden lg:flex items-center gap-2 text-xs">
+                        <span class="px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
+                            Library <span class="num font-semibold text-gray-900 dark:text-white" x-text="formatFileSize(analysis.current_config_impact.total_library_size)"></span>
+                        </span>
+                        <span class="px-2.5 py-1 rounded-full bg-primary-600/10 text-primary-700 dark:text-primary-300">
+                            Reclaimable <span class="num font-semibold" x-text="formatFileSize(analysis.current_config_impact.potential_savings)"></span>
+                        </span>
+                    </div>
+                </template>
+                <span x-show="config" x-cloak
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+                      :class="config?.safety?.dry_run ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'"
+                      :title="config?.safety?.dry_run ? 'Dry run: removals are simulated' : 'Live: removals delete files'">
+                    <span class="w-1.5 h-1.5 rounded-full" :class="config?.safety?.dry_run ? 'bg-amber-500' : 'bg-rose-500 animate-pulse'"></span>
+                    <span x-text="config?.safety?.dry_run ? 'Dry run' : 'LIVE'"></span>
                 </span>
-                <div x-show="config && config.safety && config.safety.dry_run" class="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">
-                    Dry Run Mode
-                </div>
+                <svg x-show="loading" x-cloak class="animate-spin h-4 w-4 text-primary-500" fill="none" viewBox="0 0 24 24" aria-label="Loading">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
                 <button @click="openFilters()"
-                        class="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-sm font-semibold shadow-sm transition focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-800">
+                        class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-sm font-semibold shadow-sm transition focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-gray-900">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L14 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 018 21v-7.586L3.293 6.707A1 1 0 013 6V4z"></path>
                     </svg>
-                    Filters
+                    <span class="hidden sm:inline">Filters</span>
                 </button>
-                <div class="relative group">
-                    <button @click="settingsOpen = true" aria-label="Settings"
-                            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700 transition">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                        </svg>
-                    </button>
-                    <span class="pointer-events-none absolute right-0 top-full mt-1 z-50 whitespace-nowrap rounded-md bg-gray-900 text-white text-xs px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">Settings</span>
-                </div>
+                <button @click="settingsOpen = true" aria-label="Settings" title="Settings"
+                        class="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-800 transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                </button>
             </div>
         </div>
+
+        <!-- Tabs (mobile) -->
+        <nav class="md:hidden flex gap-1 pb-2 -mt-1 overflow-x-auto whitespace-nowrap">
+            <template x-for="t in tabs" :key="t[0]">
+                <button @click="currentTab = t[0]"
+                        class="px-3 py-1.5 rounded-md text-sm font-medium transition"
+                        :class="currentTab === t[0] ? 'bg-primary-600/10 text-primary-700 dark:text-primary-300' : 'text-gray-500 dark:text-gray-400'"
+                        x-text="t[1]"></button>
+            </template>
+        </nav>
     </div>
 </header>

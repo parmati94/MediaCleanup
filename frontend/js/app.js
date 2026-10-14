@@ -19,6 +19,8 @@ window.Alpine = Alpine;
 function appData() {
     return {
         currentTab: 'dashboard',
+        tabs: [['dashboard', 'Dashboard'], ['analysis', 'Analysis'], ['removal', 'Removal'], ['removed', 'Removed']],
+        historySummary: null,
         analysisSection: 'space-consumers',
         loading: false,
         refreshing: false,
@@ -29,7 +31,6 @@ function appData() {
         analysis: null,
         candidates: null,
         searchQuery: '',
-        confirmRemoval: false,
         selectedCandidates: [],
         loadingCandidates: false,
         analysisAt: null,
@@ -80,12 +81,15 @@ function appData() {
 
         // --- Local persistence: survive a plain page reload without re-fetching
         // everything. State is restored instantly and only refreshed on demand. ---
+        // Bump when the shape of cached data changes, so a reload after an update
+        // doesn't show lists saved by the previous version (e.g. without posters).
+        _cacheVersion: 2,
         _persist(key, value) {
-            try { localStorage.setItem('mc_' + key, JSON.stringify(value)); } catch (e) { /* quota/private mode */ }
+            try { localStorage.setItem(`mc${this._cacheVersion}_${key}`, JSON.stringify(value)); } catch (e) { /* quota/private mode */ }
         },
         _restore(key, fallback) {
             try {
-                const v = localStorage.getItem('mc_' + key);
+                const v = localStorage.getItem(`mc${this._cacheVersion}_${key}`);
                 return v === null ? fallback : JSON.parse(v);
             } catch (e) { return fallback; }
         },
@@ -102,6 +106,8 @@ function appData() {
         },
 
         async init() {
+            // Drop caches written by older versions.
+            try { Object.keys(localStorage).filter(k => /^mc\d*_/.test(k) && !k.startsWith(`mc${this._cacheVersion}_`)).forEach(k => localStorage.removeItem(k)); } catch (e) { /* ignore */ }
             // Restore persisted state from the last session (instant, no re-fetch).
             this.currentTab = this._restore('currentTab', 'dashboard');
             this.connectionStatus = this._restore('connectionStatus', this.connectionStatus);
@@ -125,6 +131,9 @@ function appData() {
             });
 
             await this.loadConfig();
+            // Cheap checks that keep the dashboard honest on every visit.
+            this.testAllConnections();
+            this.loadHistorySummary();
 
             // Only auto-run the analysis if we have nothing cached; otherwise the
             // restored data stands until the user hits Refresh.
@@ -137,6 +146,13 @@ function appData() {
             if (this.currentTab === 'removed') this.loadHistory();
         },
 
+        async loadHistorySummary() {
+            try {
+                const data = await (await fetch('/api/history/summary')).json();
+                if (data.success) this.historySummary = data.data;
+            } catch (e) { /* dashboard tile just shows a dash */ }
+        },
+
         // --- Removal history ("Removed" tab) ---
         async loadHistory() {
             this.historyLoading = true;
@@ -145,6 +161,7 @@ function appData() {
                 const data = await response.json();
                 if (data.success) {
                     this.history = data.data.removals;
+                    this.loadHistorySummary();
                     this.historyBatches = data.data.batches;
                     // Resume polling for anything still re-adding (e.g. after a reload).
                     this.history.filter(r => r.readd_status === 'running').forEach(r => this.pollReadd(r));
@@ -594,6 +611,47 @@ function appData() {
             }
         },
         
+        // Size stats for the candidate list, memoized on the list itself so the
+        // per-row size bars don't rescan 2,000+ items on every render.
+        candidateStats() {
+            const list = this.candidates || [];
+            if (this._statsFor !== list) {
+                let total = 0, max = 0;
+                const byId = new Map();
+                for (const c of list) {
+                    const size = c.file_size || 0;
+                    total += size;
+                    if (size > max) max = size;
+                    byId.set(c.id, size);
+                }
+                this._statsFor = list;
+                this._stats = { total, max, byId };
+            }
+            return this._stats;
+        },
+        sizePct(bytes) {
+            const max = this.candidateStats().max;
+            return max ? Math.max(2, (bytes || 0) / max * 100) : 0;
+        },
+        selectedBytes() {
+            const byId = this.candidateStats().byId;
+            return this.selectedCandidates.reduce((t, id) => t + (byId.get(id) || 0), 0);
+        },
+        async reviewRemoval() {
+            const n = this.selectedCandidates.length;
+            if (!n) return;
+            const dry = this.config?.safety?.dry_run;
+            const ok = await this.askConfirm({
+                title: dry ? `Simulate removing ${n} item${n === 1 ? '' : 's'}?` : `Remove ${n} item${n === 1 ? '' : 's'}?`,
+                message: dry
+                    ? 'Dry run is on: this only logs what would be removed. Nothing is deleted.'
+                    : 'Deletes them from Radarr/Sonarr along with their files. Each one is recorded under Removed so it can be re-added.',
+                details: [['Items', String(n)], ['Size', this.formatFileSize(this.selectedBytes())], ['Mode', dry ? 'Dry run' : 'Live']],
+                confirmLabel: dry ? 'Simulate' : `Remove ${n}`,
+                tone: dry ? 'primary' : 'danger',
+            });
+            if (ok) await this.executeRemoval();
+        },
         toggleSelectAll() {
             const filtered = this.filteredCandidates();
             if (this.selectedCandidates.length === filtered.length) {
@@ -706,10 +764,6 @@ function appData() {
             
             const itemsToRemove = this.selectedCandidates;
             
-            // Additional confirmation for large batch removals
-            if (itemsToRemove.length > 10) {
-                this.showWarning(`Large batch operation: You are about to remove ${itemsToRemove.length} items. Please verify your selection carefully.`, 10000);
-            }
 
             this.loading = true;
             try {
@@ -731,10 +785,9 @@ function appData() {
                     } else {
                         this.showSuccess(`Successfully removed ${itemsToRemove.length} item(s)`);
                     }
-                    this.confirmRemoval = false;
                     this.selectedCandidates = [];
                     // Refresh data
-                    if (this.history) this.loadHistory();
+                    if (this.history) this.loadHistory(); else this.loadHistorySummary();
                     await this.runAnalysis(false);
                     await this.loadCandidates();
                 } else {

@@ -1,76 +1,66 @@
 <div class="space-y-6">
     <div class="card">
-        <div class="flex justify-between items-center mb-4">
-            <div class="flex items-center space-x-4">
-                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Remove Media</h2>
-                <span x-show="loadingCandidates && candidates" x-cloak class="inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 dark:text-primary-400">
-                    <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Updating list&hellip;
-                </span>
+        <!-- Heading -->
+        <div class="flex flex-wrap justify-between items-start gap-4 mb-5">
+            <div>
+                <div class="flex items-center gap-3">
+                    <h2 class="page-title">Remove media</h2>
+                    <span x-show="loadingCandidates && candidates" x-cloak class="inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 dark:text-primary-400">
+                        <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                        Updating&hellip;
+                    </span>
+                </div>
+                <p class="page-subtitle" x-show="candidates" x-cloak>
+                    <span class="num" x-text="candidates?.length || 0"></span> candidates &middot;
+                    <span class="num" x-text="formatFileSize(candidateStats().total)"></span> reclaimable
+                </p>
             </div>
             <div class="flex items-center gap-3">
                 <span x-show="candidatesAt && candidates" x-cloak class="text-xs text-gray-400 dark:text-gray-500" x-text="'Updated ' + timeAgo(candidatesAt)"></span>
-                <button @click="loadCandidates" :disabled="loading" class="btn-primary">
-                    <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button @click="loadCandidates" :disabled="loading" class="btn-secondary text-sm">
+                    <svg class="w-4 h-4 mr-2" :class="loadingCandidates ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                     </svg>
-                    Refresh List
+                    Refresh
                 </button>
             </div>
         </div>
 
-        <!-- Dry Run Toggle -->
-        <div class="flex items-center justify-between p-4 mb-6 rounded-lg border-2"
-             :class="config?.safety?.dry_run ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20' : 'border-red-400 bg-red-50 dark:bg-red-900/20'">
-            <div>
-                <div class="font-semibold text-gray-800 dark:text-gray-200">Dry Run Mode</div>
-                <div class="text-sm" :class="config?.safety?.dry_run ? 'text-yellow-700 dark:text-yellow-300' : 'text-red-700 dark:text-red-300'"
-                     x-text="config?.safety?.dry_run ? 'Enabled \u2014 no files will actually be deleted' : 'Disabled \u2014 executions will permanently delete files!'"></div>
-            </div>
-            <div class="flex items-center space-x-3 flex-shrink-0 ml-4">
-                <span class="text-sm font-bold"
-                      :class="config?.safety?.dry_run ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'"
-                      x-text="config?.safety?.dry_run ? 'SAFE' : 'LIVE'"></span>
-                <button @click="toggleDryRun()" type="button"
-                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2"
-                        :class="config?.safety?.dry_run ? 'bg-yellow-400 focus:ring-yellow-500' : 'bg-red-500 focus:ring-red-500'"
-                        role="switch" :aria-checked="config?.safety?.dry_run">
-                    <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
-                          :class="config?.safety?.dry_run ? 'translate-x-5' : 'translate-x-0'"></span>
-                </button>
-            </div>
-        </div>
-
-        <!-- Active filters summary (edit them in Settings -> Removal Filters) -->
+        <!-- Status row: mode + active filters -->
         <template x-if="config">
-            <div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-6">
-                <span class="eyebrow">Filters</span>
-                <span class="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-xs font-medium text-gray-700 dark:text-gray-300"
-                      x-text="mediaType === 'both' ? 'Movies + TV' : (mediaType === 'movies' ? 'Movies' : 'TV')"></span>
-                <span class="text-sm text-gray-500 dark:text-gray-400">not played in <span class="num" x-text="config.media.days_unwatched"></span>d</span>
-                <span x-show="config.media.max_play_count === 1" class="text-sm text-gray-500 dark:text-gray-400">&middot; never-watched only</span>
-                <span x-show="config.media.max_play_count > 1" class="text-sm text-gray-500 dark:text-gray-400">&middot; watched &lt; <span class="num" x-text="config.media.max_play_count"></span>&times;</span>
-                <button @click="openFilters()" class="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline ml-auto">Edit filters &rarr;</button>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 mb-5 rounded-lg border"
+                 :class="config.safety.dry_run ? 'border-amber-300/60 bg-amber-50/60 dark:border-amber-700/50 dark:bg-amber-900/10' : 'border-rose-300/60 bg-rose-50/60 dark:border-rose-800/60 dark:bg-rose-900/10'">
+                <div class="flex items-center gap-2.5">
+                    <button @click="toggleDryRun()" type="button" role="switch" :aria-checked="!config.safety.dry_run"
+                            class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
+                            :class="config.safety.dry_run ? 'bg-amber-400 focus:ring-amber-500' : 'bg-rose-500 focus:ring-rose-500'"
+                            :title="config.safety.dry_run ? 'Switch to live removals' : 'Switch to dry run'">
+                        <span class="inline-block h-4 w-4 mt-0.5 rounded-full bg-white shadow transition"
+                              :class="config.safety.dry_run ? 'translate-x-0.5' : 'translate-x-[18px]'"></span>
+                    </button>
+                    <span class="text-sm font-semibold" :class="config.safety.dry_run ? 'text-amber-800 dark:text-amber-300' : 'text-rose-700 dark:text-rose-300'"
+                          x-text="config.safety.dry_run ? 'Dry run — removals are simulated' : 'Live — removals delete files'"></span>
+                </div>
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-500 dark:text-gray-400 sm:ml-auto">
+                    <span class="px-2 py-0.5 rounded-md bg-white/70 dark:bg-gray-800 text-xs font-medium text-gray-700 dark:text-gray-300"
+                          x-text="mediaType === 'both' ? 'Movies + TV' : (mediaType === 'movies' ? 'Movies' : 'TV')"></span>
+                    <span>not played in <span class="num" x-text="config.media.days_unwatched"></span>d</span>
+                    <span x-show="config.media.max_play_count === 1">&middot; never watched</span>
+                    <span x-show="config.media.max_play_count > 1">&middot; watched &lt; <span class="num" x-text="config.media.max_play_count"></span>&times;</span>
+                    <button @click="openFilters()" class="font-medium text-primary-600 dark:text-primary-400 hover:underline ml-1">Edit &rarr;</button>
+                </div>
             </div>
         </template>
 
         <template x-if="loadingCandidates && !candidates">
             <div class="text-center py-12">
-                <svg class="animate-spin mx-auto h-8 w-8 text-primary-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
+                <svg class="animate-spin mx-auto h-8 w-8 text-primary-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
                 <p class="text-gray-600 dark:text-gray-400 mt-4">Finding removal candidates&hellip;</p>
             </div>
         </template>
 
         <template x-if="!loadingCandidates && !candidates">
-            <div class="text-center py-12">
-                <p class="text-gray-600 dark:text-gray-400 mb-4">No candidates loaded. Click "Refresh List" to see what would be removed.</p>
-            </div>
+            <p class="text-center py-12 text-gray-600 dark:text-gray-400">No candidates loaded. Click Refresh to see what would be removed.</p>
         </template>
 
         <template x-if="candidates && candidates.length === 0">
@@ -78,189 +68,106 @@
                 <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
-                <p class="text-gray-600 dark:text-gray-400 mt-4">No items would be removed with current configuration.</p>
+                <p class="text-gray-600 dark:text-gray-400 mt-4">Nothing matches the current filters.</p>
             </div>
         </template>
 
         <template x-if="candidates && candidates.length > 0">
             <div class="transition-opacity duration-200" :class="loadingCandidates ? 'opacity-40 pointer-events-none' : ''">
-                <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mb-6">
-                    <p class="text-sm text-yellow-800 dark:text-yellow-200">
-                        <strong x-text="candidates.length"></strong> items would be removed with the current configuration.
-                        <span x-show="selectedCandidates.length > 0" class="ml-2">
-                            (<strong x-text="selectedCandidates.length"></strong> selected)
-                        </span>
-                        <span x-show="config?.safety?.dry_run" class="font-semibold block mt-1">Dry run mode is enabled - no files will actually be deleted.</span>
-                    </p>
-                </div>
-
-                <!-- Search and Filter -->
                 <div class="mb-4">
                     <input type="text" x-model="searchQuery" placeholder="Search titles..." class="input-field">
                 </div>
 
-                <!-- Candidates Table -->
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                        <thead class="bg-gray-50 dark:bg-gray-800">
-                            <tr>
-                                <th class="px-6 py-3 text-left">
-                                    <input type="checkbox" 
-                                           @click="toggleSelectAll()"
+                <!-- Candidates table: header sticks under the app bar while scrolling -->
+                <div class="overflow-x-auto md:overflow-visible -mx-2 px-2">
+                    <table class="min-w-full">
+                        <thead class="md:sticky md:top-16 z-20 bg-white/95 dark:bg-gray-900/95 backdrop-blur">
+                            <tr class="border-b border-gray-200 dark:border-gray-700">
+                                <th class="pl-3 pr-2 py-3 text-left w-8">
+                                    <input type="checkbox" @click="toggleSelectAll()"
                                            :checked="selectedCandidates.length === filteredCandidates().length && filteredCandidates().length > 0"
-                                           class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                                           class="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-800 text-primary-600 focus:ring-primary-500">
                                 </th>
-                                <th @click="sortBy('title')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                                    <div class="flex items-center space-x-1">
-                                        <span>Title</span>
-                                        <svg class="w-4 h-4" :class="sortColumn === 'title' ? 'text-primary-600' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sortColumn === 'title' && sortDirection === 'desc' ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'"></path>
-                                        </svg>
-                                    </div>
-                                </th>
-                                <th @click="sortBy('year')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                                    <div class="flex items-center space-x-1">
-                                        <span>Year</span>
-                                        <svg class="w-4 h-4" :class="sortColumn === 'year' ? 'text-primary-600' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sortColumn === 'year' && sortDirection === 'desc' ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'"></path>
-                                        </svg>
-                                    </div>
-                                </th>
-                                <th @click="sortBy('last_played')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                                    <div class="flex items-center space-x-1">
-                                        <span>Last Watched</span>
-                                        <svg class="w-4 h-4" :class="sortColumn === 'last_played' ? 'text-primary-600' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sortColumn === 'last_played' && sortDirection === 'desc' ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'"></path>
-                                        </svg>
-                                    </div>
-                                </th>
-                                <th @click="sortBy('library_type')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                                    <div class="flex items-center space-x-1">
-                                        <span>Type</span>
-                                        <svg class="w-4 h-4" :class="sortColumn === 'library_type' ? 'text-primary-600' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sortColumn === 'library_type' && sortDirection === 'desc' ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'"></path>
-                                        </svg>
-                                    </div>
-                                </th>
-                                <th @click="sortBy('library_name')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                                    <div class="flex items-center space-x-1">
-                                        <span>Library</span>
-                                        <svg class="w-4 h-4" :class="sortColumn === 'library_name' ? 'text-primary-600' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sortColumn === 'library_name' && sortDirection === 'desc' ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'"></path>
-                                        </svg>
-                                    </div>
-                                </th>
-                                <th @click="sortBy('file_size')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                                    <div class="flex items-center space-x-1">
-                                        <span>File Size</span>
-                                        <svg class="w-4 h-4" :class="sortColumn === 'file_size' ? 'text-primary-600' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sortColumn === 'file_size' && sortDirection === 'desc' ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'"></path>
-                                        </svg>
-                                    </div>
-                                </th>
-                                <th @click="sortBy('play_count')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                                    <div class="flex items-center space-x-1">
-                                        <span>Play Count</span>
-                                        <svg class="w-4 h-4" :class="sortColumn === 'play_count' ? 'text-primary-600' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="sortColumn === 'play_count' && sortDirection === 'desc' ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'"></path>
-                                        </svg>
-                                    </div>
-                                </th>
+                                <template x-for="col in [['title','Title',''],['last_played','Last watched','hidden sm:table-cell'],['play_count','Plays','hidden sm:table-cell text-right'],['library_type','Type','hidden md:table-cell'],['file_size','Size','hidden sm:table-cell text-right']]" :key="col[0]">
+                                    <th @click="sortBy(col[0])" :class="col[2]"
+                                        class="px-3 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:text-gray-800 dark:hover:text-gray-200">
+                                        <span class="inline-flex items-center gap-1">
+                                            <span x-text="col[1]"></span>
+                                            <svg class="w-3.5 h-3.5" :class="sortColumn === col[0] ? 'text-primary-600 dark:text-primary-400' : 'text-gray-300 dark:text-gray-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" :d="sortColumn === col[0] && sortDirection === 'desc' ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7'"></path>
+                                            </svg>
+                                        </span>
+                                    </th>
+                                </template>
                             </tr>
                         </thead>
-                        <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                        <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
                             <template x-for="item in filteredCandidates()" :key="item.id">
-                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
-                                    <td class="px-6 py-4">
-                                        <input type="checkbox"
-                                               :checked="isSelected(item.id)"
-                                               @click="toggleSelection(item.id)"
-                                               class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                                <tr class="cursor-pointer transition-colors"
+                                    :class="isSelected(item.id) ? 'bg-primary-50/70 dark:bg-primary-900/15' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'"
+                                    @click="toggleSelection(item.id)">
+                                    <td class="pl-3 pr-2 py-2">
+                                        <input type="checkbox" :checked="isSelected(item.id)" @click.stop="toggleSelection(item.id)"
+                                               class="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-800 text-primary-600 focus:ring-primary-500">
                                     </td>
-                                    <td class="px-6 py-4 text-sm text-gray-900 dark:text-white" x-text="item.title"></td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white" x-text="item.year || 'N/A'"></td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white" x-text="formatDate(item.last_played)"></td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full"
-                                              :class="item.library_type === 'movie' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'"
-                                              x-text="item.library_type"></span>
+                                    <td class="px-3 py-2">
+                                        <div class="flex items-center gap-3 min-w-0">
+                                            {{> poster}}
+                                            <div class="min-w-0">
+                                                <div class="text-sm font-medium text-gray-900 dark:text-white truncate" x-text="item.title"></div>
+                                                <div class="text-xs text-gray-500 dark:text-gray-400">
+                                                    <span x-text="item.year || ''"></span>
+                                                    <span class="sm:hidden" x-text="' · ' + formatDate(item.last_played) + ' · ' + formatFileSize(item.file_size)"></span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white" x-text="item.library_name"></td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white font-mono" x-text="formatFileSize(item.file_size)"></td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white" x-text="item.play_count || 0"></td>
+                                    <td class="hidden sm:table-cell px-3 py-2 whitespace-nowrap text-sm"
+                                        :class="item.last_played ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'"
+                                        x-text="formatDate(item.last_played)"></td>
+                                    <td class="hidden sm:table-cell px-3 py-2 whitespace-nowrap text-sm text-right num"
+                                        :class="item.play_count ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'"
+                                        x-text="item.play_count || 0"></td>
+                                    <td class="hidden md:table-cell px-3 py-2 whitespace-nowrap">
+                                        <span class="px-2 py-0.5 text-xs font-medium rounded-full"
+                                              :class="item.library_type === 'movie' ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300' : 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300'"
+                                              x-text="item.library_type === 'movie' ? 'Movie' : 'Show'"></span>
+                                    </td>
+                                    <td class="hidden sm:table-cell px-3 py-2 whitespace-nowrap text-right w-36">
+                                        <div class="num text-sm text-gray-900 dark:text-white" x-text="formatFileSize(item.file_size)"></div>
+                                        <div class="mt-1 h-1 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+                                            <div class="h-full rounded-full bg-primary-500/70 ml-auto" :style="`width:${sizePct(item.file_size)}%`"></div>
+                                        </div>
+                                    </td>
                                 </tr>
                             </template>
                         </tbody>
                     </table>
                 </div>
-
-                <!-- Execute Removal -->
-                <div class="mt-6 p-6 rounded-lg border"
-                     :class="config?.safety?.dry_run
-                         ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-400 dark:border-yellow-600'
-                         : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'">
-                    <!-- Dry Run banner (shown inside danger zone when active) -->
-                    <template x-if="config?.safety?.dry_run">
-                        <div class="flex items-center space-x-2 mb-4 p-3 bg-yellow-100 dark:bg-yellow-900/40 border border-yellow-400 rounded-lg">
-                            <svg class="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                            </svg>
-                            <span class="text-sm font-semibold text-yellow-800 dark:text-yellow-200">DRY RUN MODE — no files will actually be deleted when you execute</span>
-                        </div>
-                    </template>
-
-                    <h3 class="text-lg font-semibold mb-4"
-                        :class="config?.safety?.dry_run ? 'text-yellow-800 dark:text-yellow-200' : 'text-red-800 dark:text-red-200'"
-                        x-text="config?.safety?.dry_run ? '🧪 Simulated Removal' : '⚠️ Danger Zone'"></h3>
-                    <p class="text-sm mb-4"
-                       :class="config?.safety?.dry_run ? 'text-yellow-700 dark:text-yellow-300' : 'text-red-700 dark:text-red-300'">
-                        <template x-if="config?.safety?.dry_run">
-                            <span>Dry run is active. Clicking execute will simulate the removal and log what <em>would</em> have been deleted — nothing on disk will change.</span>
-                        </template>
-                        <template x-if="!config?.safety?.dry_run">
-                            <span>This action will <strong>permanently remove media files</strong> from your system.</span>
-                        </template>
-                        <template x-if="selectedCandidates.length > 0">
-                            <strong class="block mt-2">
-                                <span x-text="selectedCandidates.length"></span> item(s) selected.
-                            </strong>
-                        </template>
-                        <template x-if="selectedCandidates.length === 0">
-                            <strong class="block mt-2 text-yellow-700 dark:text-yellow-300">
-                                ⚠️ No items selected. Please select items using the checkboxes above.
-                            </strong>
-                        </template>
-                    </p>
-                    <div class="flex items-center justify-between">
-                        <label class="flex items-center">
-                            <input type="checkbox" x-model="confirmRemoval"
-                                   class="rounded border-gray-300 focus:ring-offset-0"
-                                   :class="config?.safety?.dry_run ? 'text-yellow-500 focus:ring-yellow-500' : 'text-red-600 focus:ring-red-500'">
-                            <span class="ml-2 text-sm font-medium"
-                                  :class="config?.safety?.dry_run ? 'text-yellow-800 dark:text-yellow-200' : 'text-red-800 dark:text-red-200'"
-                                  x-text="config?.safety?.dry_run ? 'I understand this is a dry run simulation' : 'I understand and want to proceed'"></span>
-                        </label>
-                        <button @click="executeRemoval"
-                                :disabled="loading || !confirmRemoval || selectedCandidates.length === 0"
-                                class="px-4 py-2 rounded-lg font-semibold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                                :class="config?.safety?.dry_run
-                                    ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
-                                    : 'bg-red-600 hover:bg-red-700 text-white'">
-                            <svg class="inline-block w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                            </svg>
-                            <span x-show="selectedCandidates.length > 0">
-                                <span x-text="config?.safety?.dry_run ? 'Simulate Removal' : 'Execute Removal'"></span>
-                                (<span x-text="selectedCandidates.length"></span> selected)
-                            </span>
-                            <span x-show="selectedCandidates.length === 0">
-                                <span x-text="config?.safety?.dry_run ? 'Simulate Removal' : 'Execute Removal'"></span>
-                                (Select items first)
-                            </span>
-                        </button>
-                    </div>
-                </div>
             </div>
         </template>
+    </div>
+
+    <!-- Selection bar: slides up while anything is selected -->
+    <div x-show="currentTab === 'removal' && selectedCandidates.length > 0" x-cloak
+         x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+         x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 translate-y-0" x-transition:leave-end="opacity-0 translate-y-4"
+         class="fixed inset-x-0 bottom-4 z-40 px-4 pointer-events-none">
+        <div class="pointer-events-auto mx-auto max-w-3xl flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 rounded-xl shadow-2xl border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+            <div class="text-sm">
+                <span class="num font-semibold text-gray-900 dark:text-white" x-text="selectedCandidates.length"></span>
+                <span class="text-gray-500 dark:text-gray-400">selected &middot;</span>
+                <span class="num font-semibold text-gray-900 dark:text-white" x-text="formatFileSize(selectedBytes())"></span>
+            </div>
+            <button @click="selectedCandidates = []" class="text-sm font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">Clear</button>
+            <button @click="reviewRemoval()" :disabled="loading"
+                    class="ml-auto"
+                    :class="config?.safety?.dry_run ? 'btn-secondary' : 'btn-danger'">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                </svg>
+                <span x-text="(config?.safety?.dry_run ? 'Simulate removal' : 'Remove') + ' (' + selectedCandidates.length + ')'"></span>
+            </button>
+        </div>
     </div>
 </div>

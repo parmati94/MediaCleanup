@@ -1,0 +1,6 @@
+<template x-if="item.poster && !item._posterFailed">
+    <img :src="item.poster" alt="" loading="lazy" decoding="async" class="poster" @error="item._posterFailed = true">
+</template>
+<template x-if="!item.poster || item._posterFailed">
+    <div class="poster-fallback" x-text="(item.title || '?').replace(/^(the|a|an)\s+/i, '').charAt(0).toUpperCase()"></div>
+</template>

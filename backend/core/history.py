@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS removals (
     readd_detail TEXT,
     readd_at     TEXT,
     new_arr_id   INTEGER,
-    restored_at  TEXT                    -- when the re-added item had files in the library again
+    restored_at  TEXT,                   -- when the re-added item had files in the library again
+    poster       TEXT                    -- poster thumbnail URL (TMDB/TVDB)
 );
 CREATE TABLE IF NOT EXISTS releases (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,6 +108,8 @@ class HistoryStore:
             cols = {r[1] for r in c.execute("PRAGMA table_info(removals)")}
             if 'restored_at' not in cols:
                 c.execute("ALTER TABLE removals ADD COLUMN restored_at TEXT")
+            if 'poster' not in cols:
+                c.execute("ALTER TABLE removals ADD COLUMN poster TEXT")
 
     @contextmanager
     def _conn(self):
@@ -134,7 +137,7 @@ class HistoryStore:
     def add_removal(self, batch_id: str, record: Dict[str, Any], status: str = 'pending',
                     removed_at: Optional[str] = None) -> int:
         cols = ('media_type', 'arr_id', 'title', 'year', 'tmdb_id', 'tvdb_id', 'imdb_id', 'path',
-                'size_bytes', 'quality', 'last_played', 'play_count', 'capture_note')
+                'size_bytes', 'quality', 'last_played', 'play_count', 'capture_note', 'poster')
         with self._conn() as c:
             cur = c.execute(
                 f"INSERT INTO removals(batch_id, removed_at, status, readd_json, {', '.join(cols)}) "
@@ -162,6 +165,15 @@ class HistoryStore:
         """Drop a pending record whose delete failed (the item is still in the library)."""
         with self._conn() as c:
             c.execute("DELETE FROM removals WHERE id=? AND status='pending'", (removal_id,))
+
+    def missing_posters(self) -> List[tuple]:
+        with self._conn() as c:
+            return [tuple(r) for r in c.execute(
+                "SELECT id, media_type, tmdb_id, tvdb_id FROM removals WHERE poster IS NULL")]
+
+    def set_poster(self, removal_id: int, url: str) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE removals SET poster=? WHERE id=?", (url, removal_id))
 
     def mark_restored(self, removal_id: int) -> None:
         with self._conn() as c:
@@ -331,6 +343,16 @@ def _api_event(ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def poster_url(images) -> Optional[str]:
+    """Poster thumbnail from a Radarr/Sonarr images list. TMDB serves resized
+    variants, so ask for a small one instead of the multi-MB original."""
+    for img in images or []:
+        if img.get('coverType') == 'poster' and img.get('remoteUrl'):
+            url = img['remoteUrl']
+            return url.replace('/t/p/original/', '/t/p/w154/') if 'image.tmdb.org' in url else url
+    return None
+
+
 def capture_movie(radarr, movie_id: int) -> Dict[str, Any]:
     """Snapshot a Radarr movie (must run BEFORE it is deleted)."""
     mv = radarr.get_movie(movie_id)
@@ -341,6 +363,7 @@ def capture_movie(radarr, movie_id: int) -> Dict[str, Any]:
         'tmdb_id': mv.get('tmdbId'), 'imdb_id': mv.get('imdbId'),
         'path': mv.get('path'), 'size_bytes': mv.get('sizeOnDisk'),
         'quality': ((mf.get('quality') or {}).get('quality') or {}).get('name'),
+        'poster': poster_url(mv.get('images')),
         'readd': {k: mv.get(k) for k in ('tmdbId', 'imdbId', 'title', 'year', 'qualityProfileId',
                                          'rootFolderPath', 'path', 'monitored', 'minimumAvailability', 'tags')},
         'releases': [],
@@ -364,6 +387,7 @@ def capture_series(sonarr, series_id: int) -> Dict[str, Any]:
         'title': sr.get('title'), 'year': sr.get('year'),
         'tvdb_id': sr.get('tvdbId'), 'tmdb_id': sr.get('tmdbId') or None, 'imdb_id': sr.get('imdbId'),
         'path': sr.get('path'), 'size_bytes': (sr.get('statistics') or {}).get('sizeOnDisk'),
+        'poster': poster_url(sr.get('images')),
         'readd': {
             **{k: sr.get(k) for k in ('tvdbId', 'title', 'year', 'qualityProfileId', 'rootFolderPath', 'path',
                                       'monitored', 'seasonFolder', 'seriesType', 'monitorNewItems', 'tags')},

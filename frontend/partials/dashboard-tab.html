@@ -30,11 +30,6 @@
                         </div>
                     </div>
                     <div class="flex flex-col items-end gap-3">
-                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                              :class="config?.safety?.dry_run ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'">
-                            <span class="w-1.5 h-1.5 rounded-full" :class="config?.safety?.dry_run ? 'bg-amber-500' : 'bg-rose-500'"></span>
-                            <span x-text="config?.safety?.dry_run ? 'Dry run' : 'LIVE'"></span>
-                        </span>
                         <div class="flex items-center gap-2">
                             <span x-show="analysisAt" x-cloak class="text-xs text-gray-400 dark:text-gray-500 mr-1" x-text="'Updated ' + timeAgo(analysisAt)"></span>
                             <button @click="runAnalysis(false)" :disabled="loading" class="btn-secondary text-sm py-1.5 px-3">Run analysis</button>
@@ -68,14 +63,16 @@
                     </div>
                 </div>
 
-                <div class="stat-tile">
-                    <div class="eyebrow">Reclaimable</div>
-                    <div class="num text-3xl font-bold text-primary-600 dark:text-primary-400 mt-1"
-                         x-text="formatFileSize(analysis.current_config_impact?.potential_savings || 0)"></div>
-                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        of <span class="num" x-text="formatFileSize(analysis.current_config_impact?.total_library_size || 0)"></span>
+                <button @click="currentTab = 'removed'" class="stat-tile text-left hover:border-primary-400/60 dark:hover:border-primary-700 transition group">
+                    <div class="eyebrow flex items-center justify-between">Freed so far
+                        <span class="text-primary-600 dark:text-primary-400 opacity-0 group-hover:opacity-100 transition">&rarr;</span></div>
+                    <div class="num text-3xl font-bold text-gray-900 dark:text-white mt-1"
+                         x-text="historySummary ? formatFileSize(historySummary.bytes) : '—'"></div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-1" x-show="historySummary">
+                        <span class="num" x-text="historySummary?.items || 0"></span> titles removed
+                        <span x-show="historySummary?.last_removed_at"> &middot; last <span x-text="formatDateTime(historySummary?.last_removed_at)"></span></span>
                     </div>
-                </div>
+                </button>
 
                 <div class="stat-tile">
                     <div class="eyebrow">Biggest single win</div>
@@ -117,7 +114,7 @@
                 <div class="stat-tile">
                     <div class="flex items-center justify-between mb-3">
                         <div class="eyebrow">Services</div>
-                        <button @click="testAllConnections()" :disabled="loading" class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">Test</button>
+                        <button @click="testAllConnections()" class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">Re-check</button>
                     </div>
                     <div class="space-y-2.5">
                         <template x-for="svc in ['tautulli','sonarr','radarr']" :key="svc">
@@ -125,7 +122,7 @@
                                 <span class="w-2.5 h-2.5 rounded-full flex-shrink-0"
                                       :class="connectionStatus[svc] === null ? 'bg-gray-300 dark:bg-gray-600' : (connectionStatus[svc]?.success ? 'bg-emerald-500' : 'bg-rose-500')"></span>
                                 <span class="font-medium text-gray-800 dark:text-gray-200 capitalize" x-text="svc"></span>
-                                <span class="text-xs text-gray-500 dark:text-gray-400 truncate ml-auto" x-text="connectionStatus[svc]?.message || 'Not tested'"></span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400 truncate ml-auto" x-text="connectionStatus[svc]?.message || 'Checking…'"></span>
                             </div>
                         </template>
                     </div>

@@ -3,13 +3,13 @@
         <div class="flex flex-wrap justify-between items-start gap-4 mb-6">
             <div>
                 <div class="flex items-center gap-3">
-                    <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Removed</h2>
+                    <h2 class="page-title">Removed</h2>
                     <span x-show="historyLoading && history" x-cloak class="inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 dark:text-primary-400">
                         <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
                         Updating&hellip;
                     </span>
                 </div>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Everything MediaCleanup has deleted, with the original release so it can be put back.</p>
+                <p class="page-subtitle">Everything MediaCleanup has deleted, with the original release so it can be put back.</p>
             </div>
             <div class="flex items-center gap-3">
                 <a href="/api/history/export.csv" class="btn-secondary text-sm">Export CSV</a>
@@ -89,15 +89,16 @@
                                         <div class="flex items-center gap-3 py-2.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60 rounded-md px-2 -mx-2"
                                              @click="toggleHistoryRow(item.id)">
                                             <svg class="w-4 h-4 text-gray-400 flex-shrink-0 transition-transform" :class="historyExpanded[item.id] ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full flex-shrink-0"
-                                                  :class="item.media_type === 'movie' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'"
-                                                  x-text="item.media_type === 'movie' ? 'movie' : 'show'"></span>
+                                            {{> poster}}
                                             <div class="min-w-0 flex-1">
                                                 <div class="text-sm text-gray-900 dark:text-white truncate">
                                                     <span x-text="item.title"></span>
                                                     <span class="text-gray-400" x-show="item.year" x-text="'(' + item.year + ')'"></span>
                                                 </div>
                                                 <div class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                                    <span class="px-1.5 py-px mr-1 text-[10px] font-semibold uppercase tracking-wide rounded"
+                                                          :class="item.media_type === 'movie' ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300' : 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300'"
+                                                          x-text="item.media_type === 'movie' ? 'Movie' : 'Show'"></span>
                                                     <span class="sm:hidden num" x-text="formatFileSize(item.size_bytes) + ' · '"></span>
                                                     <span x-text="item.quality || (item.releases[0] && item.releases[0].quality) || ''"></span>
                                                     <span x-show="item.releases.length"> &middot; <span x-text="[...new Set(item.releases.map(r => r.indexer).filter(Boolean))].join(', ') || 'no tracker link'"></span></span>

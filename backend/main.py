@@ -19,7 +19,7 @@ import yaml
 
 from backend.core.analyzer import LibraryAnalyzer
 from backend.core.media_remover import MediaRemover
-from backend.core.history import HistoryStore, start_readd, refresh_in_flight, IN_FLIGHT
+from backend.core.history import HistoryStore, start_readd, refresh_in_flight, IN_FLIGHT, poster_url
 from backend.api.tautulli import TautulliAPI
 from backend.api.radarr import RadarrAPI
 from backend.api.sonarr import SonarrAPI
@@ -115,6 +115,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"No config file found — writing defaults to {CONFIG_PATH}")
         save_config(get_default_config())
     threading.Thread(target=_watch_warmer, name="watch-warmer", daemon=True).start()
+    threading.Thread(target=_backfill_history_posters, name="poster-backfill", daemon=True).start()
     yield
     logger.info("Shutting down Media Cleanup UI backend")
 
@@ -503,6 +504,36 @@ def _store_watch_map(sig, data: Dict[str, Any]) -> None:
                 f"{len(data['movie'])} movie keys, {len(data['show'])} show keys")
 
 
+def _backfill_history_posters() -> None:
+    """Fill in posters for history records captured before posters were stored
+    (one metadata lookup each; runs once in the background and skips failures)."""
+    try:
+        store = get_history()
+        missing = store.missing_posters()
+        if not missing:
+            return
+        config = load_config()
+        radarr = RadarrAPI(config['radarr']['url'], config['radarr']['api_key']) if config.get('radarr', {}).get('enabled') else None
+        sonarr = SonarrAPI(config['sonarr']['url'], config['sonarr']['api_key']) if config.get('sonarr', {}).get('enabled') else None
+        found = 0
+        for rid, media_type, tmdb_id, tvdb_id in missing:
+            try:
+                if media_type == 'movie' and radarr and tmdb_id:
+                    url = poster_url(radarr.lookup_movie_by_tmdb(tmdb_id).get('images'))
+                elif media_type == 'show' and sonarr and tvdb_id:
+                    url = poster_url((sonarr.lookup_series_by_tvdb(tvdb_id) or {}).get('images'))
+                else:
+                    continue
+                if url:
+                    store.set_poster(rid, url)
+                    found += 1
+            except Exception:
+                continue
+        logger.info(f"Removal history: filled in {found}/{len(missing)} posters")
+    except Exception as e:
+        logger.warning(f"Poster backfill failed: {e}")
+
+
 _WATCH_REFRESH_SECONDS = 5 * 3600   # < _WATCH_FULL_REBUILD_SECONDS, so requests never pay for it
 
 
@@ -537,7 +568,7 @@ def watch_for(lib: str, title: str) -> Dict[str, Any]:
     return {}
 
 
-def _catalog_item(lib, arr_id, title, year, size, added_iso, genres, rating, audience, clean_title, watch_map):
+def _catalog_item(lib, arr_id, title, year, size, added_iso, genres, rating, audience, clean_title, watch_map, poster=None):
     """Assemble one catalog item (Radarr/Sonarr fields + joined Tautulli watch data)."""
     watch = None
     for k in _sonarr_radarr_title_keys(title or '', clean_title):
@@ -559,6 +590,7 @@ def _catalog_item(lib, arr_id, title, year, size, added_iso, genres, rating, aud
         'genres': genres or [],
         'rating': rating,
         'audience_rating': audience,
+        'poster': poster,
     }
 
 
@@ -606,7 +638,7 @@ def _build_catalog(config: Dict[str, Any]) -> tuple:
                     mv.get('added'), mv.get('genres'),
                     _arr_rating(mv.get('ratings'), ('imdb', 'tmdb', 'trakt')),
                     _arr_rating(mv.get('ratings'), ('tmdb', 'trakt', 'imdb')),
-                    mv.get('cleanTitle'), movie_watch))
+                    mv.get('cleanTitle'), movie_watch, poster_url(mv.get('images'))))
             logger.info(f"Radarr catalog: {sum(1 for i in items if i['library_type']=='movie')} movies with files")
         except Exception as e:
             logger.warning(f"Could not load Radarr catalog: {e}")
@@ -624,7 +656,7 @@ def _build_catalog(config: Dict[str, Any]) -> tuple:
                 items.append(_catalog_item(
                     'show', sr.get('id'), sr.get('title'), sr.get('year'), size,
                     sr.get('added'), sr.get('genres'), rv, rv,
-                    sr.get('cleanTitle'), show_watch))
+                    sr.get('cleanTitle'), show_watch, poster_url(sr.get('images'))))
             logger.info(f"Sonarr catalog: {sum(1 for i in items if i['library_type']=='show')} series with files")
         except Exception as e:
             logger.warning(f"Could not load Sonarr catalog: {e}")
@@ -775,6 +807,7 @@ async def get_removal_candidates():
                     'added_at': item.get('added_at'),
                     'play_count': item.get('play_count', 0),
                     'file_size': item.get('file_size', 0),
+                    'poster': item.get('poster'),
                 })
 
         return {"success": True, "data": candidates}
@@ -859,6 +892,17 @@ def list_history():
     except Exception as e:
         logger.error(f"Error reading removal history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/history/summary")
+def history_summary():
+    """Totals for the dashboard: what's currently removed (not restored)."""
+    rows = [r for r in get_history().list_removals() if r.get('readd_status') != 'restored']
+    return {"success": True, "data": {
+        "items": len(rows),
+        "bytes": sum(r.get('size_bytes') or 0 for r in rows),
+        "last_removed_at": max((r['removed_at'] for r in rows), default=None),
+    }}
 
 
 @app.get("/api/history/export.csv")
@@ -1165,7 +1209,8 @@ def _get_top_lists(items: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]
                     'file_size': size_bytes,
                     'play_count': play_count,
                     'last_played': item.get('last_played'),
-                    'rating_key': item.get('rating_key')
+                    'rating_key': item.get('rating_key'),
+                    'poster': item.get('poster'),
                 })
             except (ValueError, TypeError):
                 continue
@@ -1214,7 +1259,8 @@ def _get_top_lists(items: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]
                 'days_old': days_old,
                 'added_at': item.get('added_at'),
                 'file_size': size_bytes,
-                'rating_key': item.get('rating_key')
+                'rating_key': item.get('rating_key'),
+                'poster': item.get('poster'),
             })
         except (ValueError, TypeError):
             continue
