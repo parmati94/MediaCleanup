@@ -219,6 +219,7 @@ class HistoryStore:
             d['quality_profile_id'] = spec.get('qualityProfileId')
             d['root_folder'] = spec.get('rootFolderPath')
             d['releases'] = rels.get(d['id'], [])
+            d['poster'] = thumb_url(d.get('poster'))   # rows stored before thumbnails
             out.append(d)
         return out
 
@@ -343,13 +344,26 @@ def _api_event(ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def thumb_url(url: Optional[str]) -> Optional[str]:
+    """Small variant of a poster URL. The tables draw posters 32px wide, but the
+    originals are big: TMDB serves resized copies (w154: ~12KB), and TVDB has a
+    '_t' thumbnail (340x500, ~50KB) next to each 680x1000 (~250KB) original. The
+    frontend falls back to the original if a thumbnail is missing."""
+    import re
+    if not url:
+        return url
+    if 'image.tmdb.org' in url:
+        return url.replace('/t/p/original/', '/t/p/w154/')
+    if 'artworks.thetvdb.com' in url and not re.search(r'_t\.(jpe?g|png)$', url):
+        return re.sub(r'\.(jpe?g|png)$', r'_t.\1', url)
+    return url
+
+
 def poster_url(images) -> Optional[str]:
-    """Poster thumbnail from a Radarr/Sonarr images list. TMDB serves resized
-    variants, so ask for a small one instead of the multi-MB original."""
+    """Poster thumbnail URL from a Radarr/Sonarr images list."""
     for img in images or []:
         if img.get('coverType') == 'poster' and img.get('remoteUrl'):
-            url = img['remoteUrl']
-            return url.replace('/t/p/original/', '/t/p/w154/') if 'image.tmdb.org' in url else url
+            return thumb_url(img['remoteUrl'])
     return None
 
 

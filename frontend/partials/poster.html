@@ -1,5 +1,5 @@
 <template x-if="item.poster && !item._posterFailed">
-    <img :src="item.poster" alt="" loading="lazy" decoding="async" class="poster" @error="item._posterFailed = true">
+    <img :src="item.poster" alt="" loading="lazy" decoding="async" class="poster" @error="/_t\.(jpe?g|png)$/.test($el.src) ? ($el.src = $el.src.replace(/_t\.(jpe?g|png)$/, '.$1')) : (item._posterFailed = true)">
 </template>
 <template x-if="!item.poster || item._posterFailed">
     <div class="poster-fallback" x-text="(item.title || '?').replace(/^(the|a|an)\s+/i, '').charAt(0).toUpperCase()"></div>
