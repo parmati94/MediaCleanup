@@ -32,8 +32,8 @@
                 <template x-if="dialog.list && dialog.list.length">
                     <div class="mt-3">
                         <div class="eyebrow mb-1.5" x-text="dialog.listTitle"></div>
-                        <ul class="rounded-lg border border-gray-200/70 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700/60 text-xs">
-                            <template x-for="row in dialog.list" :key="row[0]">
+                        <ul class="max-h-56 overflow-y-auto rounded-lg border border-gray-200/70 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700/60 text-xs">
+                            <template x-for="row in dialog.list" :key="row[2] || row[0]">
                                 <li class="flex justify-between gap-3 px-3 py-1.5">
                                     <span class="truncate text-gray-800 dark:text-gray-200" x-text="row[0]"></span>
                                     <span class="num text-gray-500 dark:text-gray-400 flex-shrink-0" x-text="row[1]"></span>

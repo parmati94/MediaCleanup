@@ -32,6 +32,7 @@ function appData() {
         candidates: null,
         searchQuery: '',
         selectedCandidates: [],
+        selectionOpen: false,
         loadingCandidates: false,
         analysisAt: null,
         candidatesAt: null,
@@ -120,6 +121,7 @@ function appData() {
             this.$watch('currentTab', (v) => this._persist('currentTab', v));
             this.$watch('analysis', (v) => this._persist('analysis', v));
             this.$watch('candidates', (v) => this._persist('candidates', v));
+            this.$watch('selectedCandidates', (v) => { if (!v.length) this.selectionOpen = false; });
 
             // Lazy-load removal candidates the first time the tab is opened (unless
             // a cached list was just restored).
@@ -603,21 +605,31 @@ function appData() {
             const list = this.candidates || [];
             if (this._statsFor !== list) {
                 let total = 0, max = 0;
-                const byId = new Map();
+                const byId = new Map(), items = new Map();
                 for (const c of list) {
                     const size = c.file_size || 0;
                     total += size;
                     if (size > max) max = size;
                     byId.set(c.id, size);
+                    items.set(c.id, c);
                 }
                 this._statsFor = list;
-                this._stats = { total, max, byId };
+                this._stats = { total, max, byId, items };
             }
             return this._stats;
         },
         sizePct(bytes) {
             const max = this.candidateStats().max;
             return max ? Math.max(2, (bytes || 0) / max * 100) : 0;
+        },
+        // Selected candidates, biggest first (for the selection bar and confirm dialog).
+        selectedItems() {
+            const items = this.candidateStats().items;
+            return this.selectedCandidates.map(id => items.get(id)).filter(Boolean)
+                .sort((a, b) => (b.file_size || 0) - (a.file_size || 0));
+        },
+        titleWithYear(c) {
+            return c.title + (c.year && !String(c.title).includes(`(${c.year})`) ? ` (${c.year})` : '');
         },
         selectedBytes() {
             const byId = this.candidateStats().byId;
@@ -630,18 +642,15 @@ function appData() {
             const dry = this.config?.safety?.dry_run;
             // Big removals get a second look: the largest titles, and the count typed back.
             const big = n > 25 || bytes > 500 * 1024 ** 3;
-            const selected = new Set(this.selectedCandidates);
-            const biggest = big ? (this.candidates || []).filter(c => selected.has(c.id))
-                .sort((a, b) => (b.file_size || 0) - (a.file_size || 0)).slice(0, 5)
-                .map(c => [c.title + (c.year && !String(c.title).includes(`(${c.year})`) ? ` (${c.year})` : ''), this.formatFileSize(c.file_size)]) : [];
+            const list = this.selectedItems().map(c => [this.titleWithYear(c), this.formatFileSize(c.file_size), c.id]);
             const ok = await this.askConfirm({
                 title: `${dry ? 'Simulate removing' : 'Remove'} ${n} item${n === 1 ? '' : 's'}?`,
                 message: dry
                     ? 'Dry run is set in config.yaml: this only logs what would be removed.'
                     : 'Deletes them from Radarr/Sonarr along with their files. Each one is recorded under Removed so it can be re-added.',
                 details: [['Items', String(n)], ['Size', this.formatFileSize(bytes)]],
-                list: biggest,
-                listTitle: n > 5 ? 'Largest in this selection' : 'Selection',
+                list,
+                listTitle: n > 1 ? 'Selection, largest first' : 'Selection',
                 requireText: big && !dry ? String(n) : '',
                 confirmLabel: dry ? 'Simulate' : `Remove ${n}`,
                 tone: dry ? 'primary' : 'danger',
