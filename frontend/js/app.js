@@ -42,6 +42,7 @@ function appData() {
         historyQuery: '',
         historyType: 'all',
         historyExpanded: {},
+        dialog: { open: false, title: '', message: '', details: [], confirmLabel: 'Confirm', cancelLabel: 'Cancel', tone: 'primary' },
         sortColumn: 'title',
         sortDirection: 'asc',
         toasts: [],
@@ -201,9 +202,35 @@ function appData() {
                 searching: 'Re-added (searching)', failed: 'Re-add failed',
             }[item.readd_status] || '';
         },
+        // Themed confirmation dialog. Resolves true/false.
+        askConfirm({ title, message = '', details = [], confirmLabel = 'Confirm', cancelLabel = 'Cancel', tone = 'primary' }) {
+            this.dialog = { open: true, title, message, details, confirmLabel, cancelLabel, tone };
+            this.$nextTick(() => this.$refs.dialogConfirm?.focus());
+            return new Promise(resolve => { this._dialogResolve = resolve; });
+        },
+        closeDialog(result) {
+            this.dialog.open = false;
+            const resolve = this._dialogResolve;
+            this._dialogResolve = null;
+            if (resolve) resolve(result);
+        },
         async readdItem(item) {
             const what = item.media_type === 'movie' ? 'Radarr' : 'Sonarr';
-            if (!confirm(`Re-add "${item.title}" to ${what} and download it again?`)) return;
+            const rels = item.releases;
+            const indexers = [...new Set(rels.map(r => r.indexer).filter(Boolean))];
+            const details = [['Size', this.formatFileSize(item.size_bytes)]];
+            if (rels.length === 1) details.push(['Release', rels[0].title, true]);
+            else if (rels.length > 1) details.push(['Releases', `${rels.length} (${this.seasonLabel([...new Set(rels.flatMap(r => r.seasons || []))].sort((a, b) => a - b)) || 'various'})`]);
+            if (indexers.length) details.push(['From', indexers.join(', ')]);
+            const ok = await this.askConfirm({
+                title: `Re-add ${item.title}${item.year ? ` (${item.year})` : ''}?`,
+                message: rels.length
+                    ? `Adds it back to ${what} with its original profile and folder, then downloads the same release again. If that release can't be found, ${what} searches for the best available one.`
+                    : `Adds it back to ${what} with its original profile and folder. No original release is on record, so ${what} searches for the best available one.`,
+                details,
+                confirmLabel: 'Re-add & download',
+            });
+            if (!ok) return;
             try {
                 const response = await fetch(`/api/history/${item.id}/readd`, { method: 'POST' });
                 const data = await response.json();
@@ -231,11 +258,25 @@ function appData() {
             else this.showWarning(`${item.title}: re-added, ${item.readd_status === 'partial' ? 'some seasons' : 'release'} being searched for`);
         },
         async copyText(text, what) {
+            // navigator.clipboard needs a secure context (https/localhost); over plain
+            // http on the LAN fall back to a hidden textarea + execCommand.
             try {
-                await navigator.clipboard.writeText(text);
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.setAttribute('readonly', '');
+                    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    const ok = document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    if (!ok) throw new Error('copy failed');
+                }
                 this.showSuccess(`${what} copied`);
             } catch (e) {
-                window.prompt(`Copy ${what}:`, text);
+                this.showError(`Couldn't copy ${what.toLowerCase()}`);
             }
         },
 

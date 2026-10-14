@@ -1,0 +1,40 @@
+<!-- Confirmation dialog (themed replacement for window.confirm; see askConfirm in app.js) -->
+<div x-show="dialog.open" x-cloak
+     class="fixed inset-0 z-50 flex items-center justify-center p-4"
+     x-transition.opacity
+     @keydown.escape.window="dialog.open && closeDialog(false)">
+    <div class="fixed inset-0 bg-black/50" @click="closeDialog(false)"></div>
+    <div class="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-xl shadow-2xl"
+         x-show="dialog.open" x-transition.scale.95>
+        <div class="flex items-start gap-4 px-6 pt-6 pb-4">
+            <div class="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full"
+                 :class="dialog.tone === 'danger' ? 'bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300' : 'bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-300'">
+                <svg x-show="dialog.tone !== 'danger'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                <svg x-show="dialog.tone === 'danger'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+            </div>
+            <div class="min-w-0 flex-1">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white" x-text="dialog.title"></h3>
+                <p class="mt-1 text-sm text-gray-600 dark:text-gray-300" x-text="dialog.message"></p>
+                <template x-if="dialog.details && dialog.details.length">
+                    <dl class="mt-3 rounded-lg bg-gray-50 dark:bg-gray-900/60 border border-gray-200/70 dark:border-gray-700 px-3 py-2 space-y-1 text-xs">
+                        <template x-for="row in dialog.details" :key="row[0]">
+                            <div class="flex gap-3">
+                                <dt class="w-20 flex-shrink-0 text-gray-500 dark:text-gray-400" x-text="row[0]"></dt>
+                                <dd class="min-w-0 text-gray-800 dark:text-gray-200 break-words" :class="row[2] ? 'font-mono' : ''" x-text="row[1]"></dd>
+                            </div>
+                        </template>
+                    </dl>
+                </template>
+            </div>
+        </div>
+        <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700">
+            <button @click="closeDialog(false)" class="btn-secondary" x-text="dialog.cancelLabel"></button>
+            <button @click="closeDialog(true)" x-ref="dialogConfirm"
+                    :class="dialog.tone === 'danger' ? 'btn-danger' : 'btn-primary'" x-text="dialog.confirmLabel"></button>
+        </div>
+    </div>
+</div>
