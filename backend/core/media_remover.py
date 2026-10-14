@@ -241,6 +241,8 @@ class MediaRemover:
                 record = minimal_record(lib, arr_id, e)
             record.update({k: (watch or {}).get(f"{lib}:{arr_id}", {}).get(k)
                            for k in ('last_played', 'play_count')})
+            logging.info(f"Captured '{record.get('title')}' for removal history "
+                         f"({len(record.get('releases') or [])} original release(s))")
             try:
                 return history.add_removal(batch_id, record)
             except Exception as e:

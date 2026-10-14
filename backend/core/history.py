@@ -454,9 +454,32 @@ def _reachable(url: str) -> bool:
         return False
 
 
-def _deliver(rel, push, search, grab, label) -> Tuple[bool, str]:
-    """Try push, then search-and-match. Returns (grabbed, log line)."""
+def _import_existing(rel, importable, import_files, file_payload) -> Optional[str]:
+    """If the original torrent is still in the download client (complete), import it
+    directly - no download, and a re-grab would be refused as a duplicate anyway.
+    Returns a description of what was imported, or None."""
+    did = (rel.get('info_hash') or '').upper()
+    if not did:
+        return None
+    files = [f for f in importable(did)
+             if (f.get('downloadId') or '').upper() == did and not f.get('rejections')]
+    if not files:
+        return None
+    import_files([dict(file_payload(f), downloadId=did) for f in files])
+    return f"{len(files)} file(s)"
+
+
+def _deliver(rel, push, search, grab, label, existing=None) -> Tuple[bool, str]:
+    """Import from the download client if the original is still there, else push,
+    else search-and-match. Returns (delivered, log line)."""
     notes = []
+    if existing:
+        try:
+            done = existing(rel)
+            if done:
+                return True, f"{label}: original torrent is still in the download client - imported it ({done}, no download needed)"
+        except Exception as e:
+            notes.append(f"import from download client failed: {_err(e)}")
     if rel.get('download_url') and not _reachable(rel['download_url']):
         notes.append("stored download link no longer reachable")
     elif rel.get('download_url') and rel.get('title'):
@@ -468,14 +491,19 @@ def _deliver(rel, push, search, grab, label) -> Tuple[bool, str]:
         except Exception as e:
             notes.append(f"push failed: {_err(e)}")
     if rel.get('title') or rel.get('info_hash'):
+        hit = None
         try:
             hit = _match_result(search(), rel)
-            if hit:
-                grab(hit['guid'], hit['indexerId'])
-                return True, f"{label}: found the same release on {hit.get('indexer')} and grabbed it ({hit.get('title')})"
-            notes.append("not found in search results")
+            if not hit:
+                notes.append("not found in search results")
         except Exception as e:
             notes.append(f"search failed: {_err(e)}")
+        if hit:
+            try:
+                grab(hit['guid'], hit['indexerId'])
+                return True, f"{label}: found the same release on {hit.get('indexer')} and grabbed it ({hit.get('title')})"
+            except Exception as e:
+                notes.append(f"found it on {hit.get('indexer')} but the grab failed: {_err(e)}")
     return False, f"{label}: {', '.join(notes) or 'no stored release'}"
 
 
@@ -500,7 +528,7 @@ def readd_movie(radarr, rec: Dict[str, Any]) -> Tuple[str, List[str], Optional[i
         log.append(f"Added to Radarr (id {movie['id']})")
 
     mid = movie['id']
-    extra = {'tmdbId': spec['tmdbId'], 'imdbId': spec.get('imdbId'), 'movieId': mid}
+    extra = {'tmdbId': spec['tmdbId'], 'movieId': mid}
     cache = {}
 
     def search():
@@ -508,9 +536,16 @@ def readd_movie(radarr, rec: Dict[str, Any]) -> Tuple[str, List[str], Optional[i
             cache['r'] = radarr.search_releases(mid)
         return cache['r']
 
+    def existing(rel):
+        return _import_existing(
+            rel, lambda did: radarr.importable_files(did, mid), radarr.import_files,
+            lambda f: {'path': f['path'], 'movieId': mid, 'quality': f.get('quality'),
+                       'languages': f.get('languages') or [], 'releaseGroup': f.get('releaseGroup'),
+                       'indexerFlags': f.get('indexerFlags') or 0})
+
     for rel in rec['releases']:
         ok, line = _deliver(rel, lambda r: radarr.push_release(_push_payload(r, extra)),
-                            search, radarr.grab_release, 'Movie')
+                            search, radarr.grab_release, 'Movie', existing)
         log.append(line)
         if ok:
             return 'grabbed', log, mid
@@ -568,6 +603,14 @@ def readd_series(sonarr, rec: Dict[str, Any]) -> Tuple[str, List[str], Optional[
             return cache[season]
         return run
 
+    def existing(rel):
+        return _import_existing(
+            rel, lambda did: sonarr.importable_files(did, sid), sonarr.import_files,
+            lambda f: {'path': f['path'], 'seriesId': sid, 'seasonNumber': f.get('seasonNumber'),
+                       'episodeIds': [e['id'] for e in f.get('episodes') or []], 'quality': f.get('quality'),
+                       'languages': f.get('languages') or [], 'releaseGroup': f.get('releaseGroup'),
+                       'releaseType': f.get('releaseType'), 'indexerFlags': f.get('indexerFlags') or 0})
+
     covered, missed = set(), set()
     for rel in rec['releases']:
         seasons = rel.get('seasons') or []
@@ -575,7 +618,7 @@ def readd_series(sonarr, rec: Dict[str, Any]) -> Tuple[str, List[str], Optional[
         first = seasons[0] if seasons else None
         ok, line = _deliver(rel, lambda r: sonarr.push_release(_push_payload(r, extra)),
                             searcher(first) if first is not None else (lambda: []),
-                            sonarr.grab_release, label)
+                            sonarr.grab_release, label, existing)
         log.append(line)
         (covered if ok else missed).update(seasons)
 
@@ -610,6 +653,8 @@ def start_readd(store: HistoryStore, removal_id: int, radarr, sonarr) -> bool:
             rec = store.get_removal(removal_id)
             if not rec or not rec.get('readd'):
                 raise RuntimeError('No re-add information was captured for this item')
+            logging.info(f"Re-add of '{rec['title']}' ({rec['media_type']}) started: "
+                         f"{len(rec['releases'])} original release(s) on record")
             if rec['media_type'] == 'movie':
                 if not radarr:
                     raise RuntimeError('Radarr is not enabled')
@@ -619,6 +664,8 @@ def start_readd(store: HistoryStore, removal_id: int, radarr, sonarr) -> bool:
                     raise RuntimeError('Sonarr is not enabled')
                 status, log, new_id = readd_series(sonarr, rec)
             store.set_readd(removal_id, status, '\n'.join(log), new_id)
+            for line in log:
+                logging.info(f"Re-add of '{rec['title']}': {line}")
             logging.info(f"Re-add of '{rec['title']}' finished: {status}")
         except Exception as e:
             logging.error(f"Re-add {removal_id} failed: {e}", exc_info=True)

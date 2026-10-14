@@ -141,3 +141,12 @@ class RadarrAPI:
         """Queue Radarr's normal automatic search for a movie."""
         return self._make_request('command', method='POST',
                                   json={'name': 'MoviesSearch', 'movieIds': [movie_id]})
+
+    def importable_files(self, download_id: str, movie_id: int) -> List[Dict[str, Any]]:
+        """Files Radarr could import from a download still in the download client."""
+        return self._make_request('manualimport', params={
+            'downloadId': download_id, 'movieId': movie_id, 'filterExistingFiles': 'true'}) or []
+
+    def import_files(self, files: List[Dict[str, Any]]) -> Any:
+        return self._make_request('command', method='POST',
+                                  json={'name': 'ManualImport', 'files': files, 'importMode': 'auto'})

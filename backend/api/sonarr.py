@@ -148,3 +148,14 @@ class SonarrAPI:
         for n in season_numbers:
             self._make_request('command', method='POST',
                                json={'name': 'SeasonSearch', 'seriesId': series_id, 'seasonNumber': n})
+
+    def importable_files(self, download_id: str, series_id: int) -> List[Dict[str, Any]]:
+        """Files Sonarr could import from a download still in the download client.
+        NB: for an unknown download id Sonarr lists the series folder instead, so
+        callers must check each file's downloadId."""
+        return self._make_request('manualimport', params={
+            'downloadId': download_id, 'seriesId': series_id, 'filterExistingFiles': 'true'}) or []
+
+    def import_files(self, files: List[Dict[str, Any]]) -> Any:
+        return self._make_request('command', method='POST',
+                                  json={'name': 'ManualImport', 'files': files, 'importMode': 'auto'})
