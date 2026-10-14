@@ -153,8 +153,12 @@ class SonarrAPI:
         """Files Sonarr could import from a download still in the download client.
         NB: for an unknown download id Sonarr lists the series folder instead, so
         callers must check each file's downloadId."""
-        return self._make_request('manualimport', params={
-            'downloadId': download_id, 'seriesId': series_id, 'filterExistingFiles': 'true'}) or []
+        # Called directly (not via _make_request) so an expected 500 for an unknown
+        # download id isn't logged as an API error.
+        resp = self.session.get(f"{self.url}/api/v3/manualimport", timeout=60, params={
+            'downloadId': download_id, 'seriesId': series_id, 'filterExistingFiles': 'true'})
+        resp.raise_for_status()
+        return resp.json() or []
 
     def import_files(self, files: List[Dict[str, Any]]) -> Any:
         return self._make_request('command', method='POST',

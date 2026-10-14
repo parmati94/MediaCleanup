@@ -397,6 +397,8 @@ def _queue_progress(records: List[Dict[str, Any]]) -> Optional[str]:
     """One-line summary of Radarr/Sonarr queue entries for an item."""
     if not records:
         return None
+    # Sonarr lists a season pack once per episode - count each download once.
+    records = list({(r.get('downloadId') or r.get('id')): r for r in records}.values())
     states = {r.get('trackedDownloadState') for r in records}
     if states & {'importPending', 'importing'}:
         return 'Importing' if len(records) == 1 else f'Importing ({len(records)} downloads)'
@@ -553,7 +555,13 @@ def _import_existing(rel, importable, import_files, file_payload) -> Optional[st
     did = (rel.get('info_hash') or '').upper()
     if not did:
         return None
-    files = [f for f in importable(did)
+    try:
+        candidates = importable(did)
+    except Exception:
+        # Sonarr answers 500 for a download id its client doesn't have - that just
+        # means the torrent is gone, which is the normal case.
+        return None
+    files = [f for f in candidates
              if (f.get('downloadId') or '').upper() == did and not f.get('rejections')]
     if not files:
         return None
